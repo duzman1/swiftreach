@@ -1,4 +1,4 @@
-# Meta WhatsApp Cloud API — Setup Guide
+# WhatsApp Cloud API — Setup Guide
 
 This walks you from zero to a working WhatsApp Cloud API integration. Plan for 30–60 minutes the first time. Meta's UI changes occasionally — if a label is slightly different, look for the closest match.
 

@@ -1,4 +1,4 @@
-// Meta WhatsApp Cloud API client. Server-side only — the access token must
+// WhatsApp Cloud API client. Server-side only — the access token must
 // never be exposed to the browser.
 
 import axios, { AxiosError } from "axios";

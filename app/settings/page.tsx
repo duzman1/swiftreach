@@ -28,7 +28,7 @@ export default function SettingsPage() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Meta WhatsApp Cloud API configuration. Values come from{" "}
+          WhatsApp configuration. Values come from{" "}
           <code className="text-xs bg-zinc-200 px-1 py-0.5 rounded">.env.local</code>.
         </p>
       </header>

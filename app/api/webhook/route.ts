@@ -1,4 +1,4 @@
-// Meta WhatsApp Cloud API webhook endpoint.
+// WhatsApp webhook endpoint.
 // GET  — verification handshake (returns hub.challenge if verify_token matches)
 // POST — delivery / read receipts and inbound messages.
 

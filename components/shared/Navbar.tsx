@@ -24,7 +24,6 @@ export function Navbar() {
         </div>
         <div>
           <div className="font-semibold leading-tight">SwiftReach</div>
-          <div className="text-xs text-zinc-400 leading-tight">Bulk Messenger</div>
         </div>
       </div>
 
