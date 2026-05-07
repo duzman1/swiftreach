@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Campaign {
+  id           String    @id @default(cuid())
+  name         String
+  mode         String
+  templateName String?
+  rawMessage   String?
+  staticVars   String    @default("{}")
+  variableMap  String    @default("[]")
+  formatRules  String    @default("{}")
+  phoneColumn  String
+  delayMs      Int       @default(2000)
+  status       String    @default("draft")
+  totalCount   Int       @default(0)
+  sentCount    Int       @default(0)
+  failedCount  Int       @default(0)
+  skippedCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+  contacts     Contact[]
+}
+
+model Contact {
+  id                  String    @id @default(cuid())
+  campaignId          String
+  campaign            Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  phoneNumber         String
+  rowData             String
+  personalizedMessage String
+  whatsappMsgId       String?
+  status              String    @default("pending")
+  errorMessage        String?
+  sentAt              DateTime?
+  deliveredAt         DateTime?
+  readAt              DateTime?
+
+  @@index([campaignId])
+  @@index([whatsappMsgId])
+}
+
+model MessageTemplate {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  content     String
+  staticVars  String    @default("{}")
+  formatRules String    @default("{}")
+  usageCount  Int       @default(0)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Settings {
+  id                 String @id @default("singleton")
+  defaultCountryCode String @default("1")
+  defaultDelayMs     Int    @default(2000)
+}
