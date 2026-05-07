@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, X, AlertTriangle } from "lucide-react";
+import { Plus, X, AlertTriangle, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -9,6 +9,15 @@ import { Button } from "@/components/ui/button";
 import { FILTER_OPS, type FilterRule, applyFilters } from "@/lib/applyFilters";
 import type { ParsedFile } from "@/lib/parseFile";
 import { cn } from "@/lib/utils";
+
+// Reject blank or placeholder-ish names so users don't accidentally save
+// 5 campaigns called "Test" and lose track of them later.
+export function isCampaignNameInvalid(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed === "") return true;
+  if (trimmed.toLowerCase() === "test") return true;
+  return false;
+}
 
 interface Props {
   parsed: ParsedFile;
@@ -37,6 +46,16 @@ export function CampaignSettings({
   );
   const total = parsed.rows.length;
 
+  // Show the name error after the user has interacted with the field. The
+  // "test" placeholder match shows immediately even without blur — it's a
+  // strong signal the user means to come back later, so we shouldn't let it
+  // through silently.
+  const [touchedName, setTouchedName] = React.useState(false);
+  const trimmedLower = campaignName.trim().toLowerCase();
+  const showNameError =
+    trimmedLower === "test" ||
+    (touchedName && campaignName.trim() === "");
+
   function addFilter() {
     const firstNonPhone = parsed.headers.find((h) => h !== phoneColumn) ?? "";
     onFilters([...filters, { column: firstNonPhone, op: "is_not_empty", value: "" }]);
@@ -60,9 +79,25 @@ export function CampaignSettings({
           <Input
             id="campaign-name"
             value={campaignName}
-            onChange={(e) => onCampaignName(e.target.value)}
-            placeholder="e.g. May 2026 Reminder"
+            onChange={(e) => {
+              onCampaignName(e.target.value);
+              if (!touchedName) setTouchedName(true);
+            }}
+            onBlur={() => setTouchedName(true)}
+            placeholder="e.g. April Meeting Reminder, Black Friday Promo"
+            className={cn(showNameError && "border-red-500 focus-visible:ring-red-500")}
+            aria-invalid={showNameError}
+            aria-describedby={showNameError ? "campaign-name-error" : undefined}
           />
+          {showNameError && (
+            <p
+              id="campaign-name-error"
+              className="text-xs text-red-600 mt-1.5 flex items-start gap-1"
+            >
+              <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              Please enter a descriptive campaign name
+            </p>
+          )}
         </div>
 
         <div>

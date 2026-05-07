@@ -53,9 +53,6 @@ export function Navbar() {
         })}
       </nav>
 
-      <div className="mt-auto px-3 py-4 text-xs text-zinc-500">
-        Meta WhatsApp Cloud API
-      </div>
     </aside>
   );
 }

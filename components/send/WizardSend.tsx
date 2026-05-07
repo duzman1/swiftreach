@@ -15,7 +15,7 @@ import { MessageEditor } from "./MessageEditor";
 import { LivePreview } from "./LivePreview";
 import { ValidationSummary } from "./ValidationSummary";
 import { FormatRulesEditor } from "./FormatRulesEditor";
-import { CampaignSettings } from "./CampaignSettings";
+import { CampaignSettings, isCampaignNameInvalid } from "./CampaignSettings";
 import { ContactReviewTable } from "./ContactReviewTable";
 import { ProgressPanel } from "./ProgressPanel";
 import { TemplateMapper } from "./TemplateMapper";
@@ -349,7 +349,7 @@ export function WizardSend() {
   const readyToSend =
     parsed !== null &&
     phoneColumn !== "" &&
-    campaignName.trim() !== "" &&
+    !isCampaignNameInvalid(campaignName) &&
     willSendCount > 0 &&
     (mode === "freeform"
       ? template.trim() !== "" && validation.unknown.length === 0
@@ -732,7 +732,7 @@ export function WizardSend() {
 
               {!readyToSend && (
                 <p className="text-xs text-muted-foreground">
-                  Need: a campaign name, a phone column, at least 1 valid contact, and
+                  Need: a descriptive campaign name (not blank or &quot;Test&quot;), a phone column, at least 1 valid contact, and
                   {mode === "freeform"
                     ? " a message with no unknown variables."
                     : " a template name."}
