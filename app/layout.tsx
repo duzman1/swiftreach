@@ -3,9 +3,9 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { Navbar, MobileTopbar } from "@/components/shared/Navbar";
 
-const APP_TITLE = "SwiftReach — WhatsApp Bulk Messenger";
+const APP_TITLE = "SwiftReach — WhatsApp Business marketing for small businesses";
 const APP_DESCRIPTION =
-  "Send personalized WhatsApp messages at scale with SwiftReach. Upload any contact list, build custom message templates, and track delivery in real time.";
+  "Create, send, and track personalized WhatsApp Business campaigns for opted-in customers. Upload contacts, use custom message templates, and monitor delivery in real time.";
 
 export const metadata: Metadata = {
   title: {
