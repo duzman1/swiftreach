@@ -141,3 +141,10 @@ export async function PUT(req: NextRequest) {
     return handleApiError(err, "PUT /api/user/settings");
   }
 }
+
+// POST is an alias for PUT — same behavior. The onboarding flow specs POST,
+// the Settings page uses PUT, both keep working. Keep this thin so the two
+// stay identical going forward.
+export async function POST(req: NextRequest) {
+  return PUT(req);
+}

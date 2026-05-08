@@ -2,16 +2,29 @@
 // their Meta credentials, tests them against the live API, then sets a few
 // defaults. They can also skip — Settings will show a "WhatsApp not
 // connected" banner until creds are filled in.
+//
+// Already-configured users (re-visiting /onboarding manually) get bounced
+// to the dashboard so they don't accidentally re-do setup.
 
 import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { MessageCircle } from "lucide-react";
+import { requireUser } from "@/lib/auth";
 import { OnboardingForm } from "./OnboardingForm";
 
+export const dynamic = "force-dynamic";
+
 export default async function OnboardingPage() {
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
+  // Auth required — middleware already protects this route, but call
+  // requireUser() to also create the User row on first access if the Clerk
+  // webhook hasn't run yet.
+  const user = await requireUser();
+
+  // Already configured? Send them home. We require BOTH a token and a
+  // phone number id to consider setup complete.
+  if (user.whatsappApiToken && user.whatsappPhoneNumberId) {
+    redirect("/");
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50 py-10 px-4">
