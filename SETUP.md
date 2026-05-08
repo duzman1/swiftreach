@@ -143,7 +143,7 @@ Once live, you can message any opted-in WhatsApp user.
 WHATSAPP_API_TOKEN=EAAG...                 # from step 5
 WHATSAPP_PHONE_NUMBER_ID=1234567890        # from step 4
 WHATSAPP_BUSINESS_ACCOUNT_ID=9876543210    # from step 4
-WHATSAPP_API_VERSION=v19.0
+WHATSAPP_API_VERSION=v25.0
 WHATSAPP_WEBHOOK_VERIFY_TOKEN=any-random-string-you-pick
 NEXT_PUBLIC_BASE_URL=http://localhost:3000
 DATABASE_URL="file:./dev.db"

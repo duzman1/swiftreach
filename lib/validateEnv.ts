@@ -39,6 +39,23 @@ const requiredEnvVars: RequiredEnv[] = [
     description: "Public app URL (Vercel URL or ngrok tunnel)",
     setupLink: "e.g. https://your-app.vercel.app",
   },
+  {
+    key: "ENCRYPTION_KEY",
+    description:
+      "64-char hex (32 bytes) — encrypts per-user Meta API tokens at rest",
+    setupLink:
+      "Generate with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+  },
+  {
+    key: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    description: "Clerk publishable key (pk_test_... or pk_live_...)",
+    setupLink: "See AUTH_SETUP.md",
+  },
+  {
+    key: "CLERK_SECRET_KEY",
+    description: "Clerk secret key (sk_test_... or sk_live_...)",
+    setupLink: "See AUTH_SETUP.md",
+  },
 ];
 
 let validated = false;

@@ -4,9 +4,13 @@ import {
   sendTemplateMessage,
   sendWithRetry,
   buildTemplateComponents,
+  DEFAULT_API_VERSION,
   type VariableMapping,
+  type WhatsAppCredentials,
 } from "@/lib/whatsapp";
 import type { FormatRule } from "@/lib/buildMessage";
+import { requireUserId } from "@/lib/auth";
+import { decrypt } from "@/lib/encrypt";
 
 export const dynamic = "force-dynamic";
 // Vercel Hobby plan caps function maxDuration at 300s. If you upgrade to Pro,
@@ -29,9 +33,19 @@ export async function GET(
   _req: Request,
   { params }: { params: { id: string } }
 ) {
+  // Auth + ownership before opening the stream.
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   const campaign = await prisma.campaign.findUnique({
     where: { id: params.id },
     include: {
+      // The owning user is needed for decrypted Meta credentials.
+      user: true,
       contacts: {
         where: { status: "pending" },
         orderBy: { id: "asc" },
@@ -39,8 +53,30 @@ export async function GET(
     },
   });
 
-  if (!campaign) {
+  if (!campaign || campaign.userId !== userId) {
     return new Response("Campaign not found", { status: 404 });
+  }
+
+  // Decrypt the user's Meta credentials once at stream start. Pass into each
+  // sendXxx() call so we use this user's token, not env or another user's.
+  const userCreds: WhatsAppCredentials | null = (() => {
+    if (!campaign.user) return null;
+    const u = campaign.user;
+    if (!u.whatsappApiToken || !u.whatsappPhoneNumberId) return null;
+    const token = decrypt(u.whatsappApiToken);
+    if (!token) return null;
+    return {
+      apiToken: token,
+      phoneNumberId: u.whatsappPhoneNumberId,
+      apiVersion: u.whatsappApiVersion ?? DEFAULT_API_VERSION,
+    };
+  })();
+
+  if (!userCreds) {
+    return new Response(
+      "Your WhatsApp credentials aren't set. Add them in Settings before sending.",
+      { status: 400 }
+    );
   }
 
   // Capture into local consts to keep TS happy inside the stream closure.
@@ -48,6 +84,7 @@ export async function GET(
   const campaignMode = campaign.mode;
   const campaignTemplateName = campaign.templateName ?? "";
   const campaignContacts = campaign.contacts;
+  const creds = userCreds;
 
   // Mark sending start
   await prisma.campaign.update({
@@ -123,7 +160,11 @@ export async function GET(
 
             const result = await sendWithRetry(() => {
               if (campaignMode === "freeform") {
-                return sendTextMessage(c.phoneNumber, c.personalizedMessage);
+                return sendTextMessage(
+                  c.phoneNumber,
+                  c.personalizedMessage,
+                  creds
+                );
               }
               const components = buildTemplateComponents(
                 variableMap,
@@ -134,7 +175,8 @@ export async function GET(
                 c.phoneNumber,
                 campaignTemplateName,
                 "en_US",
-                components
+                components,
+                creds
               );
             });
 

@@ -51,7 +51,7 @@ Vercel's local dev pulls to work):
 - `WHATSAPP_API_TOKEN`
 - `WHATSAPP_PHONE_NUMBER_ID`
 - `WHATSAPP_BUSINESS_ACCOUNT_ID`
-- `WHATSAPP_API_VERSION` — usually `v19.0` or `v25.0`
+- `WHATSAPP_API_VERSION` — `v25.0` is current
 - `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
 - `NEXT_PUBLIC_BASE_URL` — your Vercel URL, e.g. `https://swiftreach.vercel.app`
   (you'll know the URL after step 5; you can update this then and redeploy)

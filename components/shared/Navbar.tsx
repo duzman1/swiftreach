@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, Send, History, FileText, Settings, MessageCircle } from "lucide-react";
+import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -52,6 +53,20 @@ export function Navbar() {
         })}
       </nav>
 
+      {/* Account avatar + sign-out, pinned to bottom of sidebar.
+          Clerk's UserButton pops a menu with profile + sign-out. */}
+      <div className="mt-auto pt-4 border-t border-zinc-800">
+        <div className="flex items-center gap-3 px-3 py-2">
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: "w-8 h-8",
+              },
+            }}
+          />
+          <span className="text-xs text-zinc-400">Account</span>
+        </div>
+      </div>
     </aside>
   );
 }

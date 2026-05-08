@@ -1,25 +1,33 @@
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatsBar } from "@/components/shared/StatsBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ConnectionBanner } from "@/components/shared/ConnectionBanner";
 import { Send, FileText, Settings, MessageCircle } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { formatNumber, formatPercent } from "@/lib/utils";
+import { LandingPage } from "@/components/LandingPage";
 
 export const dynamic = "force-dynamic";
 
-async function loadDashboardData() {
+// Per-user dashboard stats. The `userId` filter is applied to each query so
+// users only see their own campaigns / messages.
+async function loadDashboardData(userId: string) {
   try {
-    // Use sentAt / deliveredAt timestamps as the source of truth so the
-    // delivery rate reflects what actually reached the recipient (via webhook),
-    // not just what the Meta API accepted.
     const [campaigns, totalMessages, sent, delivered, recent] = await Promise.all([
-      prisma.campaign.count(),
-      prisma.contact.count(),
-      prisma.contact.count({ where: { sentAt: { not: null } } }),
-      prisma.contact.count({ where: { deliveredAt: { not: null } } }),
+      prisma.campaign.count({ where: { userId } }),
+      prisma.contact.count({ where: { campaign: { userId } } }),
+      prisma.contact.count({
+        where: { sentAt: { not: null }, campaign: { userId } },
+      }),
+      prisma.contact.count({
+        where: { deliveredAt: { not: null }, campaign: { userId } },
+      }),
       prisma.campaign.findMany({
+        where: { userId },
         orderBy: { createdAt: "desc" },
         take: 5,
       }),
@@ -37,11 +45,26 @@ async function loadDashboardData() {
   }
 }
 
-export default async function DashboardPage() {
-  const data = await loadDashboardData();
+export default async function HomePage() {
+  const { userId } = await auth();
+
+  // Logged-out: public landing page.
+  if (!userId) {
+    return <LandingPage />;
+  }
+
+  // Logged-in: load user (creates the row if webhook missed it) + per-user
+  // dashboard data.
+  const user = await requireUser();
+  const data = await loadDashboardData(user.id);
+  const whatsappConnected = Boolean(
+    user.whatsappApiToken && user.whatsappPhoneNumberId
+  );
 
   return (
     <div className="space-y-8 max-w-7xl">
+      <ConnectionBanner show={!whatsappConnected} />
+
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">SwiftReach Dashboard</h1>

@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { normalizePhone, isValidPhone } from "@/lib/phoneUtils";
 import { buildMessage, type FormatRule } from "@/lib/buildMessage";
 import { applyFilters, type FilterRule } from "@/lib/applyFilters";
-import { buildTemplateComponents, type VariableMapping } from "@/lib/whatsapp";
+import { type VariableMapping } from "@/lib/whatsapp";
+import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 
 export const dynamic = "force-dynamic";
@@ -34,10 +35,12 @@ function badRequest(message: string) {
   return NextResponse.json({ ok: false, error: message }, { status: 400 });
 }
 
-// GET — list campaigns
+// GET — list the current user's campaigns
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const campaigns = await prisma.campaign.findMany({
+      where: { userId },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
@@ -49,6 +52,13 @@ export async function GET() {
 
 // POST — create a campaign with all contacts pre-baked
 export async function POST(req: NextRequest) {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch (err) {
+    return handleApiError(err, "POST /api/campaigns");
+  }
+
   let body: CreateCampaignBody;
   try {
     body = await req.json();
@@ -130,6 +140,7 @@ export async function POST(req: NextRequest) {
   try {
     const campaign = await prisma.campaign.create({
       data: {
+        userId,
         name: body.name.trim(),
         mode: body.mode,
         templateName: body.templateName,

@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId, assertOwnership } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 
 export const dynamic = "force-dynamic";
 
 export async function PUT(_req: Request, { params }: { params: { id: string } }) {
   try {
-    // Mark the campaign cancelled and any still-pending contacts as cancelled.
+    const userId = await requireUserId();
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: params.id },
+      select: { userId: true },
+    });
+    assertOwnership(campaign, userId);
+
     await prisma.$transaction([
       prisma.campaign.update({
         where: { id: params.id },

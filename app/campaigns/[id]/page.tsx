@@ -6,18 +6,22 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StatsBar } from "@/components/shared/StatsBar";
 import { CampaignActions } from "@/components/campaigns/CampaignActions";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/auth";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { pickContactName } from "@/lib/contactName";
 import { translateError } from "@/lib/translateError";
 
 export const dynamic = "force-dynamic";
 
-async function loadCampaign(id: string) {
+async function loadCampaign(id: string, userId: string) {
   try {
-    return await prisma.campaign.findUnique({
+    const campaign = await prisma.campaign.findUnique({
       where: { id },
       include: { contacts: { orderBy: { id: "asc" } } },
     });
+    // Ownership check — refuse to load campaigns belonging to other users.
+    if (!campaign || campaign.userId !== userId) return null;
+    return campaign;
   } catch {
     return null;
   }
@@ -33,7 +37,8 @@ export default async function CampaignDetailPage({
 }: {
   params: { id: string };
 }) {
-  const campaign = await loadCampaign(params.id);
+  const userId = await requireUserId();
+  const campaign = await loadCampaign(params.id, userId);
   if (!campaign) notFound();
 
   const contacts = campaign.contacts;

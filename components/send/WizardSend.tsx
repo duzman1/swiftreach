@@ -82,7 +82,7 @@ export function WizardSend() {
   React.useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/settings");
+        const res = await fetch("/api/user/settings");
         const data = await res.json();
         if (data.ok) {
           setDefaultCountryCode(data.settings.defaultCountryCode ?? "1");

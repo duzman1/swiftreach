@@ -8,8 +8,47 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// One row per Clerk user. The id field IS the Clerk user id (e.g. "user_abc")
+// — no extra mapping table needed. Defaults + per-user Meta credentials live
+// here too, replacing the previous singleton Settings model.
+model User {
+  id        String  @id // Clerk userId
+  email     String  @unique
+  firstName String?
+  lastName  String?
+
+  // Per-user Meta WhatsApp Cloud API credentials. Token is encrypted at rest
+  // via lib/encrypt.ts (AES-256-CBC). Never returned to the browser raw.
+  whatsappApiToken          String? // encrypted: "<iv-hex>:<ciphertext-hex>"
+  whatsappPhoneNumberId     String?
+  whatsappBusinessAccountId String?
+  whatsappApiVersion        String  @default("v25.0")
+  webhookVerifyToken        String?
+
+  // User-level defaults (replaces the Settings singleton).
+  defaultCountryCode String @default("1")
+  defaultDelayMs     Int    @default(2000)
+
+  // Subscription metadata (Phase 4).
+  plan                  String   @default("free") // free | starter | growth
+  messagesUsedThisMonth Int      @default(0)
+  billingPeriodStart    DateTime @default(now())
+
+  campaigns Campaign[]
+  templates MessageTemplate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Campaign {
-  id           String    @id @default(cuid())
+  id String @id @default(cuid())
+
+  // userId is nullable during the Phase 3 transition. Once all existing rows
+  // have been backfilled (or wiped), this is changed to required.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   name         String
   mode         String
   templateName String?
@@ -27,6 +66,8 @@ model Campaign {
   createdAt    DateTime  @default(now())
   completedAt  DateTime?
   contacts     Contact[]
+
+  @@index([userId])
 }
 
 model Contact {
@@ -48,7 +89,12 @@ model Contact {
 }
 
 model MessageTemplate {
-  id          String    @id @default(cuid())
+  id String @id @default(cuid())
+
+  // userId is nullable during the Phase 3 transition. See Campaign.userId.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   name        String
   description String?
   content     String
@@ -58,8 +104,13 @@ model MessageTemplate {
   lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
 }
 
+// DEPRECATED: replaced by per-user fields on the User model. Kept temporarily
+// so existing code paths keep compiling during the Phase 3 transition. Will
+// be removed after settings UI is migrated to the User record.
 model Settings {
   id                 String @id @default("singleton")
   defaultCountryCode String @default("1")

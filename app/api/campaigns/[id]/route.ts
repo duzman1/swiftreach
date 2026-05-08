@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId, assertOwnership } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const userId = await requireUserId();
     const campaign = await prisma.campaign.findUnique({
       where: { id: params.id },
       include: {
@@ -17,7 +19,9 @@ export async function GET(
         },
       },
     });
-    if (!campaign) {
+    if (!campaign || campaign.userId !== userId) {
+      // Same response for "doesn't exist" and "not yours" — don't leak which
+      // campaign IDs are valid in the system.
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
     return NextResponse.json({ ok: true, campaign });
@@ -31,25 +35,21 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Block deletion of an in-flight send so we don't leave the SSE loop
-    // querying a deleted campaign id.
+    const userId = await requireUserId();
     const existing = await prisma.campaign.findUnique({
       where: { id: params.id },
-      select: { status: true },
+      select: { userId: true, status: true },
     });
     if (!existing) {
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
+    assertOwnership(existing, userId);
     if (existing.status === "sending") {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Cancel the campaign before deleting it.",
-        },
+        { ok: false, error: "Cancel the campaign before deleting it." },
         { status: 409 }
       );
     }
-    // Contact rows cascade automatically via the onDelete: Cascade in schema.
     await prisma.campaign.delete({ where: { id: params.id } });
     return NextResponse.json({ ok: true });
   } catch (err) {

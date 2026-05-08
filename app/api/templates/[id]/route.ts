@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId, assertOwnership } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import type { FormatRule } from "@/lib/buildMessage";
 
@@ -23,10 +24,11 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const userId = await requireUserId();
     const template = await prisma.messageTemplate.findUnique({
       where: { id: params.id },
     });
-    if (!template) {
+    if (!template || template.userId !== userId) {
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
     return NextResponse.json({ ok: true, template });
@@ -39,34 +41,41 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  let body: UpdateTemplateBody;
   try {
-    body = await req.json();
-  } catch {
-    return badRequest("Invalid JSON body");
-  }
+    const userId = await requireUserId();
+    const existing = await prisma.messageTemplate.findUnique({
+      where: { id: params.id },
+      select: { userId: true },
+    });
+    assertOwnership(existing, userId);
 
-  const data: Record<string, unknown> = {};
-  if (body.name !== undefined) {
-    if (!body.name.trim()) return badRequest("Template name cannot be empty");
-    data.name = body.name.trim();
-  }
-  if (body.description !== undefined)
-    data.description = body.description.trim() || null;
-  if (body.content !== undefined) {
-    if (!body.content.trim()) return badRequest("Template content cannot be empty");
-    data.content = body.content;
-  }
-  if (body.staticVars !== undefined)
-    data.staticVars = JSON.stringify(body.staticVars);
-  if (body.formatRules !== undefined)
-    data.formatRules = JSON.stringify(body.formatRules);
-  if (body.bumpUsage) {
-    data.usageCount = { increment: 1 };
-    data.lastUsedAt = new Date();
-  }
+    let body: UpdateTemplateBody;
+    try {
+      body = await req.json();
+    } catch {
+      return badRequest("Invalid JSON body");
+    }
 
-  try {
+    const data: Record<string, unknown> = {};
+    if (body.name !== undefined) {
+      if (!body.name.trim()) return badRequest("Template name cannot be empty");
+      data.name = body.name.trim();
+    }
+    if (body.description !== undefined)
+      data.description = body.description.trim() || null;
+    if (body.content !== undefined) {
+      if (!body.content.trim()) return badRequest("Template content cannot be empty");
+      data.content = body.content;
+    }
+    if (body.staticVars !== undefined)
+      data.staticVars = JSON.stringify(body.staticVars);
+    if (body.formatRules !== undefined)
+      data.formatRules = JSON.stringify(body.formatRules);
+    if (body.bumpUsage) {
+      data.usageCount = { increment: 1 };
+      data.lastUsedAt = new Date();
+    }
+
     const template = await prisma.messageTemplate.update({
       where: { id: params.id },
       data,
@@ -82,6 +91,12 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const userId = await requireUserId();
+    const existing = await prisma.messageTemplate.findUnique({
+      where: { id: params.id },
+      select: { userId: true },
+    });
+    assertOwnership(existing, userId);
     await prisma.messageTemplate.delete({ where: { id: params.id } });
     return NextResponse.json({ ok: true });
   } catch (err) {

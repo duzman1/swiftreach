@@ -24,7 +24,7 @@ export function DefaultsForm() {
   React.useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/settings");
+        const res = await fetch("/api/user/settings");
         const data = await res.json();
         if (data.ok) {
           setValues({
@@ -46,7 +46,7 @@ export function DefaultsForm() {
   async function save() {
     setSaving(true);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch("/api/user/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values),

@@ -1,19 +1,24 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignListRow } from "@/components/campaigns/CampaignListRow";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-async function loadCampaigns() {
+async function loadCampaigns(userId: string) {
   try {
-    return await prisma.campaign.findMany({ orderBy: { createdAt: "desc" } });
+    return await prisma.campaign.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    });
   } catch {
     return [];
   }
 }
 
 export default async function CampaignsPage() {
-  const campaigns = await loadCampaigns();
+  const userId = await requireUserId();
+  const campaigns = await loadCampaigns(userId);
 
   return (
     <div className="space-y-6 max-w-6xl">

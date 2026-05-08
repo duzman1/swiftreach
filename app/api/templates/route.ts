@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import type { FormatRule } from "@/lib/buildMessage";
 
@@ -19,7 +20,9 @@ function badRequest(message: string) {
 
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const templates = await prisma.messageTemplate.findMany({
+      where: { userId },
       orderBy: { updatedAt: "desc" },
     });
     return NextResponse.json({ ok: true, templates });
@@ -29,6 +32,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch (err) {
+    return handleApiError(err, "POST /api/templates");
+  }
+
   let body: CreateTemplateBody;
   try {
     body = await req.json();
@@ -41,6 +51,7 @@ export async function POST(req: NextRequest) {
   try {
     const template = await prisma.messageTemplate.create({
       data: {
+        userId,
         name: body.name.trim(),
         description: body.description?.trim() || null,
         content: body.content,
