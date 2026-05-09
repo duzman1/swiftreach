@@ -20,9 +20,11 @@ export default async function OnboardingPage() {
   // webhook hasn't run yet.
   const user = await requireUser();
 
-  // Already configured? Send them home. We require BOTH a token and a
-  // phone number id to consider setup complete.
-  if (user.whatsappApiToken && user.whatsappPhoneNumberId) {
+  // Already onboarded? Send them home. Covers both paths:
+  //   - User saved their creds (onboardingCompletedAt set on save)
+  //   - User clicked "Skip for now" (onboardingCompletedAt set on skip)
+  // Either way, /onboarding is one-shot — re-visiting it bounces them.
+  if (user.onboardingCompletedAt) {
     redirect("/");
   }
 

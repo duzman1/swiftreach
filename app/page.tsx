@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,9 +54,16 @@ export default async function HomePage() {
     return <LandingPage />;
   }
 
-  // Logged-in: load user (creates the row if webhook missed it) + per-user
-  // dashboard data.
+  // Logged-in: load user (creates the row if Clerk webhook missed it).
   const user = await requireUser();
+
+  // Belt-and-suspenders against Clerk's NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
+  // not being set: if the user hasn't been through onboarding yet, send them
+  // there. Both Save and Skip mark this complete, so we don't loop.
+  if (!user.onboardingCompletedAt) {
+    redirect("/onboarding");
+  }
+
   const data = await loadDashboardData(user.id);
   const whatsappConnected = Boolean(
     user.whatsappApiToken && user.whatsappPhoneNumberId

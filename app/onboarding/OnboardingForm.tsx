@@ -91,6 +91,7 @@ export function OnboardingForm() {
           webhookVerifyToken: webhookVerifyToken.trim() || null,
           defaultCountryCode,
           defaultDelayMs,
+          onboardingComplete: true,
         }),
       });
       const data = await res.json();
@@ -108,15 +109,28 @@ export function OnboardingForm() {
     }
   }
 
-  function skipForNow() {
+  async function skipForNow() {
     if (
-      confirm(
+      !confirm(
         "Skip setup for now? You won't be able to send campaigns until you add your WhatsApp credentials in Settings."
       )
     ) {
-      router.push("/");
-      router.refresh();
+      return;
     }
+    // Mark onboarding complete server-side so the dashboard doesn't keep
+    // bouncing the user back here on every visit. Best-effort — if the
+    // request fails (e.g. offline), still navigate; user can re-skip later.
+    try {
+      await fetch("/api/user/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ onboardingComplete: true }),
+      });
+    } catch {
+      /* ignore — we'll just route through onboarding once more */
+    }
+    router.push("/");
+    router.refresh();
   }
 
   // ── Step 1 ─────────────────────────────────────────────────────────────

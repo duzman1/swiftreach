@@ -29,6 +29,13 @@ model User {
   defaultCountryCode String @default("1")
   defaultDelayMs     Int    @default(2000)
 
+  // Set the first time the user finishes the onboarding wizard — either by
+  // saving their Meta credentials OR by clicking "Skip for now". Used by /
+  // and /onboarding to know whether to send the user through setup. Acts as
+  // a belt-and-suspenders against Clerk's NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
+  // not being configured in every environment.
+  onboardingCompletedAt DateTime?
+
   // Subscription metadata (Phase 4).
   plan                  String   @default("free") // free | starter | growth
   messagesUsedThisMonth Int      @default(0)

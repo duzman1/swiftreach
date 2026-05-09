@@ -27,6 +27,9 @@ interface UpdateBody {
   webhookVerifyToken?: string | null;
   defaultCountryCode?: string;
   defaultDelayMs?: number;
+  // Set to true when the user finishes (or skips) the onboarding wizard.
+  // Once true, the dashboard stops auto-redirecting to /onboarding.
+  onboardingComplete?: boolean;
 }
 
 function bad(message: string, status = 400) {
@@ -115,6 +118,13 @@ export async function PUT(req: NextRequest) {
         return bad("Default delay must be between 500 and 60000 ms");
       }
       data.defaultDelayMs = Math.round(v);
+    }
+
+    // Stamp onboardingCompletedAt the first time someone explicitly marks the
+    // wizard complete (Save & Finish, or Skip for now). Don't overwrite an
+    // existing timestamp.
+    if (body.onboardingComplete && !user.onboardingCompletedAt) {
+      data.onboardingCompletedAt = new Date();
     }
 
     const updated = await prisma.user.update({
