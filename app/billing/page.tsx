@@ -3,7 +3,7 @@
 // downgrades, payment-method updates all go through the Stripe Customer
 // Portal — opened by the "Manage Subscription" button.
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireUser } from "@/lib/auth";
 import { PLANS, getPlan, type PlanId } from "@/lib/stripe";
@@ -47,6 +47,66 @@ function pickStatusBadge(
     return <Badge variant="secondary">Cancelled</Badge>;
   }
   return <Badge variant="secondary">{status ?? "—"}</Badge>;
+}
+
+/**
+ * One-line plan status under the title. Three visual states encode urgency:
+ *   - past_due → red, action-required copy
+ *   - cancelAtPeriodEnd → amber, winding-down copy
+ *   - active subscription → muted, "Renews [date]"
+ *   - free → muted, "You're on the free plan."
+ */
+function SubscriptionStatusLine({
+  plan,
+  status,
+  cancelAtPeriodEnd,
+  currentPeriodEnd,
+}: {
+  plan: PlanId;
+  status: string | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: Date | null;
+}) {
+  // Payment failed — most urgent, render in red.
+  if (status === "past_due") {
+    return (
+      <p className="text-sm font-medium text-red-700 mt-1">
+        Payment failed · Update payment method
+      </p>
+    );
+  }
+
+  // Subscription is winding down at period end — amber.
+  if (cancelAtPeriodEnd && currentPeriodEnd) {
+    return (
+      <p className="text-sm font-medium text-amber-700 mt-1">
+        Access until {fmtDate(currentPeriodEnd)} · Cancelled
+      </p>
+    );
+  }
+
+  // Healthy paid subscription — show next renewal date.
+  if (
+    (status === "active" || status === "trialing") &&
+    currentPeriodEnd
+  ) {
+    return (
+      <p className="text-sm text-muted-foreground mt-1">
+        Renews {fmtDate(currentPeriodEnd)}
+      </p>
+    );
+  }
+
+  // Free plan — informational hint.
+  if (plan === "free") {
+    return (
+      <p className="text-sm text-muted-foreground mt-1">
+        You&apos;re on the free plan.
+      </p>
+    );
+  }
+
+  return null;
 }
 
 export default async function BillingPage() {
@@ -100,17 +160,15 @@ export default async function BillingPage() {
               user.currentPeriodEnd
             )}
           </CardTitle>
-          <CardDescription>
-            {user.cancelAtPeriodEnd && user.currentPeriodEnd
-              ? `Access until ${fmtDate(user.currentPeriodEnd)}.`
-              : user.stripeSubscriptionStatus === "active" && user.currentPeriodEnd
-              ? `Renews on ${fmtDate(user.currentPeriodEnd)}.`
-              : user.stripeSubscriptionStatus === "past_due"
-              ? "Your last payment failed. Update your card to keep sending."
-              : plan.id === "free"
-              ? "You're on the free plan."
-              : ""}
-          </CardDescription>
+          {/* Prominent status line right under the badge. Color encodes state:
+              past_due → red (action required), cancelAtPeriodEnd → amber
+              (winding down), active → muted (informational). */}
+          <SubscriptionStatusLine
+            plan={plan.id}
+            status={user.stripeSubscriptionStatus}
+            cancelAtPeriodEnd={user.cancelAtPeriodEnd}
+            currentPeriodEnd={user.currentPeriodEnd}
+          />
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -120,8 +178,20 @@ export default async function BillingPage() {
                 {Number.isFinite(limit) ? `${used.toLocaleString()} / ${limit.toLocaleString()}` : `${used.toLocaleString()}`}
               </span>
             </div>
-            <div className="h-2.5 w-full bg-zinc-100 rounded-full overflow-hidden">
-              <div className={`h-full transition-all ${bandClass}`} style={{ width: `${percent}%` }} />
+            {/* Visual progress bar — 8px tall on zinc-200, fill recolors at
+                75% (amber) and 90% (red). Width = used / limit ratio. */}
+            <div
+              className="h-2 w-full bg-zinc-200 rounded-full overflow-hidden"
+              role="progressbar"
+              aria-valuenow={percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Messages used this month"
+            >
+              <div
+                className={`h-full transition-all ${bandClass}`}
+                style={{ width: `${percent}%` }}
+              />
             </div>
             <div className="text-xs text-muted-foreground mt-1.5 flex flex-wrap items-center gap-3">
               <span>{percent}% used</span>
