@@ -1,6 +1,6 @@
-# WhatsApp Bulk Messenger
+# SwiftReach
 
-A self-hosted web app for sending personalized WhatsApp messages at scale via the official Meta WhatsApp Business Cloud API. Upload any Excel or CSV file, write a message template using your file's column headers as variables, preview per-contact, and send. No variable names are hardcoded — the variable system is driven entirely by your data.
+WhatsApp Business marketing for small businesses. Create, send, and track compliant WhatsApp Business campaigns to opted-in customers via the official Meta WhatsApp Cloud API. Upload an Excel or CSV customer list, build reusable message templates using your file's column headers as variables, preview per-contact, and send. No variable names are hardcoded — the variable system is driven entirely by your data.
 
 ## Prerequisites
 

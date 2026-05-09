@@ -6,7 +6,7 @@ export default function TemplatesPage() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight">Templates</h1>
         <p className="text-muted-foreground mt-1">
-          Reusable, column-agnostic message templates.
+          Reusable, column-agnostic campaign templates for opted-in customers.
         </p>
       </header>
       <TemplatesView />

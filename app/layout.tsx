@@ -7,7 +7,7 @@ import { Navbar, MobileTopbar } from "@/components/shared/Navbar";
 
 const APP_TITLE = "SwiftReach — WhatsApp Business marketing for small businesses";
 const APP_DESCRIPTION =
-  "Create, send, and track personalized WhatsApp Business campaigns for opted-in customers. Upload contacts, use custom message templates, and monitor delivery in real time.";
+  "Create, send, and track compliant WhatsApp Business campaigns for opted-in customers. Upload contacts, build reusable message templates, and monitor delivery in real time.";
 
 export const metadata: Metadata = {
   title: {

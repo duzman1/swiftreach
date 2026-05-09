@@ -7,7 +7,7 @@
 const APP_METADATA = {
   title: "SwiftReach",
   description:
-    "Send personalized WhatsApp messages at scale. Upload contacts, build templates, track delivery.",
+    "Create, send, and track compliant WhatsApp Business campaigns for opted-in customers. Upload contacts, build reusable message templates, and monitor delivery in real time.",
 };
 
 const nextConfig = {

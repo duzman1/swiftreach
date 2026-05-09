@@ -26,11 +26,12 @@ export function LandingPage() {
 
       <main className="flex-1 flex flex-col items-center justify-center px-6 max-w-3xl mx-auto w-full text-center py-12">
         <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4">
-          Send personalized WhatsApp messages at scale.
+          WhatsApp Business marketing for small businesses.
         </h1>
         <p className="text-lg text-muted-foreground mb-8 max-w-2xl">
-          Upload any contact list, build custom templates with your own
-          variables, and track every delivery in real time.
+          Create, send, and track compliant WhatsApp Business campaigns to
+          opted-in customers. Personalize every message, build reusable
+          templates, and monitor delivery in real time.
         </p>
         <div className="flex flex-col sm:flex-row items-center gap-3">
           <Link href="/sign-up">
@@ -50,17 +51,17 @@ export function LandingPage() {
         <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
           <Feature
             icon={<FileSpreadsheet className="w-6 h-6" />}
-            title="Upload any list"
-            description="Excel, CSV, or directly from Google Drive. Column headers become your variables — no schema config required."
+            title="Bring your own customer list"
+            description="Excel, CSV, or directly from Google Drive. Column headers become campaign variables — no schema config required."
           />
           <Feature
             icon={<Variable className="w-6 h-6" />}
-            title="Personalize every message"
-            description="Drop your file's columns into a message template. Each contact gets a message that's actually about them."
+            title="Personalize every campaign"
+            description="Drop your file's columns into a reusable template. Each opted-in customer gets a message that's actually about them."
           />
           <Feature
             icon={<LineChart className="w-6 h-6" />}
-            title="Track in real time"
+            title="Track delivery in real time"
             description="See sends, deliveries, reads, and failures live. Pause, resume, or retry failed contacts at any moment."
           />
         </div>
@@ -69,7 +70,7 @@ export function LandingPage() {
       <section className="px-6 py-16">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight mb-3">
-            Ready to reach your contacts on WhatsApp?
+            Ready to message your opted-in customers on WhatsApp?
           </h2>
           <p className="text-muted-foreground mb-6">
             Free to start. No credit card required.

@@ -7,7 +7,7 @@ export default function NewCampaignPage() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight">New Campaign</h1>
         <p className="text-muted-foreground mt-1">
-          Upload a contact list, compose a personalized message, and send.
+          Upload your customer list, compose a personalized campaign, and reach opted-in customers on WhatsApp.
         </p>
       </header>
 

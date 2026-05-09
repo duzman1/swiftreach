@@ -16,8 +16,8 @@ export default async function SettingsPage() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Your WhatsApp credentials and account defaults. Stored encrypted in
-          your account.
+          Manage your WhatsApp Business connection, sending defaults, and
+          webhook settings. Credentials are stored encrypted in your account.
         </p>
       </header>
 

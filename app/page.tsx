@@ -77,7 +77,7 @@ export default async function HomePage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">SwiftReach Dashboard</h1>
           <p className="text-muted-foreground mt-1">
-            Send personalized WhatsApp messages at scale with SwiftReach.
+            Send compliant, personalized WhatsApp Business campaigns to opted-in customers.
           </p>
         </div>
         <Link href="/send">
@@ -139,19 +139,19 @@ export default async function HomePage() {
             href="/send"
             icon={<Send className="w-5 h-5" />}
             title="New Campaign"
-            description="Upload contacts, build a message, and send."
+            description="Upload contacts, build a campaign, and reach your opted-in customers."
           />
           <QuickLink
             href="/templates"
             icon={<FileText className="w-5 h-5" />}
             title="Template Library"
-            description="Reusable message templates."
+            description="Reusable campaign templates for opted-in customers."
           />
           <QuickLink
             href="/settings"
             icon={<Settings className="w-5 h-5" />}
             title="Settings"
-            description="API credentials, defaults, webhook URL."
+            description="Manage your WhatsApp Business connection, sending defaults, and webhook settings."
           />
         </div>
       </div>
