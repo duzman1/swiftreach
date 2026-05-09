@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
+import { checkTemplateLimit } from "@/lib/usageCheck";
 import type { FormatRule } from "@/lib/buildMessage";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,19 @@ export async function POST(req: NextRequest) {
   }
   if (!body.name?.trim()) return badRequest("Template name is required");
   if (!body.content?.trim()) return badRequest("Template content is required");
+
+  // Plan limit: free = 3 templates, paid = unlimited.
+  const limitCheck = await checkTemplateLimit(userId);
+  if (!limitCheck.allowed) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: limitCheck.reason,
+        upgradeRequired: limitCheck.upgradeRequired,
+      },
+      { status: 403 }
+    );
+  }
 
   try {
     const template = await prisma.messageTemplate.create({

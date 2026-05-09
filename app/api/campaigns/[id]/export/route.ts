@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
+import { checkCsvExportAllowed } from "@/lib/usageCheck";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,25 @@ export async function GET(
 ) {
   try {
     const userId = await requireUserId();
+
+    // Plan gate: Free plan can't export CSV. Return JSON 403 (rather than
+    // a CSV file with an error in it) so the client knows to show an
+    // upgrade prompt.
+    const exportCheck = await checkCsvExportAllowed(userId);
+    if (!exportCheck.allowed) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: exportCheck.reason,
+          upgradeRequired: exportCheck.upgradeRequired,
+        }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
     const campaign = await prisma.campaign.findUnique({
       where: { id: params.id },
       include: { contacts: { orderBy: { id: "asc" } } },

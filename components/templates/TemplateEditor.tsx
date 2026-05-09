@@ -89,6 +89,18 @@ export function TemplateEditor({ open, initial, onClose, onSaved }: Props) {
       });
       const data = await res.json();
       if (!data.ok) {
+        // Plan-limit refusal — show a toast with an Upgrade action so users
+        // get to /billing in one click instead of bouncing through Settings.
+        if (res.status === 403 && data.upgradeRequired) {
+          toast.error(data.error ?? "Plan limit reached", {
+            action: {
+              label: "Upgrade",
+              onClick: () => {
+                window.location.href = "/billing";
+              },
+            },
+          });
+        }
         setError(data.error ?? "Save failed");
         return;
       }

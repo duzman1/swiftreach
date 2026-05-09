@@ -11,6 +11,7 @@ import {
 import type { FormatRule } from "@/lib/buildMessage";
 import { requireUserId } from "@/lib/auth";
 import { decrypt } from "@/lib/encrypt";
+import { checkMessageLimit, incrementMessageUsage } from "@/lib/usageCheck";
 
 export const dynamic = "force-dynamic";
 // Vercel Hobby plan caps function maxDuration at 300s. If you upgrade to Pro,
@@ -79,12 +80,22 @@ export async function GET(
     );
   }
 
+  // ── Plan-limit pre-check ──────────────────────────────────────────────
+  // Refuse to start a send that would exceed the user's monthly allowance.
+  // The loop also re-checks per-iteration so a concurrent send (or a paid
+  // user whose subscription lapses mid-campaign) doesn't slip through.
+  const limitCheck = await checkMessageLimit(userId, campaign.contacts.length);
+  if (!limitCheck.allowed) {
+    return new Response(limitCheck.reason, { status: 403 });
+  }
+
   // Capture into local consts to keep TS happy inside the stream closure.
   const campaignId: string = campaign.id;
   const campaignMode = campaign.mode;
   const campaignTemplateName = campaign.templateName ?? "";
   const campaignContacts = campaign.contacts;
   const creds = userCreds;
+  const userIdLocal = userId;
 
   // Mark sending start
   await prisma.campaign.update({
@@ -145,6 +156,32 @@ export async function GET(
             return;
           }
 
+          // ── Per-iteration plan-limit re-check ────────────────────────────
+          // Catches the case where the user has another campaign sending in
+          // parallel, or a paid subscription lapsed mid-campaign. Remaining
+          // contacts get a "limit_reached" status so the UI can prompt
+          // upgrade and the user can retry after upgrading.
+          const live = await checkMessageLimit(userIdLocal, 1);
+          if (!live.allowed) {
+            // Mark THIS contact + everything still pending as limit_reached.
+            const remainingIds = contacts.slice(i).map((x) => x.id);
+            await prisma.contact.updateMany({
+              where: { id: { in: remainingIds } },
+              data: {
+                status: "limit_reached",
+                errorMessage: live.reason,
+              },
+            });
+            emit("limit_reached", {
+              processed,
+              skipped: remainingIds.length,
+              reason: live.reason,
+            });
+            await finalize("completed");
+            close();
+            return;
+          }
+
           await prisma.contact.update({
             where: { id: c.id },
             data: { status: "sending" },
@@ -201,8 +238,14 @@ export async function GET(
             },
           });
 
-          if (nextStatus === "sent") sentCount++;
-          else failedCount++;
+          if (nextStatus === "sent") {
+            sentCount++;
+            // Charge against the user's monthly allowance only on success —
+            // failed sends don't count.
+            await incrementMessageUsage(userIdLocal, 1);
+          } else {
+            failedCount++;
+          }
           processed++;
 
           // Update campaign aggregates

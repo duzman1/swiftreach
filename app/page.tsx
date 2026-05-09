@@ -9,8 +9,10 @@ import { ConnectionBanner } from "@/components/shared/ConnectionBanner";
 import { Send, FileText, Settings, MessageCircle } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import { getPlan } from "@/lib/stripe";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { LandingPage } from "@/components/LandingPage";
+import { UsageMeter } from "@/components/billing/UsageMeter";
 
 export const dynamic = "force-dynamic";
 
@@ -68,10 +70,17 @@ export default async function HomePage() {
   const whatsappConnected = Boolean(
     user.whatsappApiToken && user.whatsappPhoneNumberId
   );
+  const plan = getPlan(user.plan);
 
   return (
     <div className="space-y-8 max-w-7xl">
       <ConnectionBanner show={!whatsappConnected} />
+
+      <UsageMeter
+        plan={plan}
+        used={user.messagesUsedThisMonth}
+        resetsAt={user.currentPeriodEnd}
+      />
 
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>

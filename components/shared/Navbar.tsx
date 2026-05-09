@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Send, History, FileText, Settings, MessageCircle } from "lucide-react";
+import { LayoutDashboard, Send, History, FileText, Settings, MessageCircle, CreditCard } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
+import { PlanBadge } from "./PlanBadge";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -12,6 +13,7 @@ const NAV = [
   { href: "/campaigns", label: "Campaigns", icon: History },
   { href: "/templates", label: "Templates", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/billing", label: "Billing", icon: CreditCard },
 ];
 
 export function Navbar() {
@@ -64,7 +66,10 @@ export function Navbar() {
               },
             }}
           />
-          <span className="text-xs text-zinc-400">Account</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-zinc-400">Account</div>
+          </div>
+          <PlanBadge />
         </div>
       </div>
     </aside>

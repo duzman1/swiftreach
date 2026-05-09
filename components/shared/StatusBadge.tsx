@@ -13,7 +13,8 @@ type Status =
   | "cancelled"
   | "draft"
   | "paused"
-  | "completed";
+  | "completed"
+  | "limit_reached";
 
 const STATUS_STYLES: Record<Status, string> = {
   pending: "bg-zinc-200 text-zinc-700 border-transparent",
@@ -28,11 +29,17 @@ const STATUS_STYLES: Record<Status, string> = {
   draft: "bg-zinc-200 text-zinc-700 border-transparent",
   paused: "bg-amber-500 text-white border-transparent",
   completed: "bg-emerald-600 text-white border-transparent",
+  limit_reached: "bg-orange-600 text-white border-transparent",
+};
+
+const STATUS_LABELS: Partial<Record<Status, string>> = {
+  limit_reached: "Limit Reached",
 };
 
 export function StatusBadge({ status }: { status: string }) {
   const key = (status as Status) in STATUS_STYLES ? (status as Status) : "pending";
+  const label = STATUS_LABELS[key] ?? status;
   return (
-    <Badge className={cn("capitalize", STATUS_STYLES[key])}>{status}</Badge>
+    <Badge className={cn("capitalize", STATUS_STYLES[key])}>{label}</Badge>
   );
 }

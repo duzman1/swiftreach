@@ -17,6 +17,7 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   "/api/webhook(.*)",     // Meta WhatsApp webhook (incl. /api/webhook/[userId])
   "/api/clerk-webhook",   // Clerk user lifecycle webhook
+  "/api/billing/webhook", // Stripe billing webhook
 ]);
 
 export default clerkMiddleware(async (auth, request) => {

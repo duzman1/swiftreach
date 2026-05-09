@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Download, RotateCcw, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -148,12 +147,7 @@ export function CampaignActions({
             : `Retry ${failedCount} failed`}
         </Button>
       )}
-      <Link href={`/api/campaigns/${campaignId}/export`} download>
-        <Button variant="outline" className="gap-2">
-          <Download className="w-4 h-4" />
-          Export CSV
-        </Button>
-      </Link>
+      <ExportCsvButton campaignId={campaignId} campaignName={campaignName} />
       <Button
         variant="destructive"
         onClick={deleteCampaign}
@@ -168,5 +162,73 @@ export function CampaignActions({
         Delete
       </Button>
     </div>
+  );
+}
+
+/**
+ * Export CSV via fetch (rather than a plain <a download>) so we can detect
+ * the 403 plan-gate response and surface an Upgrade prompt instead of
+ * dumping JSON into the browser tab.
+ */
+function ExportCsvButton({
+  campaignId,
+  campaignName,
+}: {
+  campaignId: string;
+  campaignName: string;
+}) {
+  const [exporting, setExporting] = React.useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/export`);
+      if (res.status === 403) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(
+          data.error ?? "CSV export is not available on your current plan.",
+          {
+            action: {
+              label: "Upgrade",
+              onClick: () => {
+                window.location.href = "/billing";
+              },
+            },
+          }
+        );
+        return;
+      }
+      if (!res.ok) {
+        toast.error(`Export failed (HTTP ${res.status})`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${campaignName.replace(/[^a-zA-Z0-9._-]+/g, "_")}_results.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setExporting(false);
+    }
+  }
+  return (
+    <Button
+      variant="outline"
+      onClick={exportCsv}
+      disabled={exporting}
+      className="gap-2"
+    >
+      {exporting ? (
+        <Loader2 className="w-4 h-4 animate-spin" />
+      ) : (
+        <Download className="w-4 h-4" />
+      )}
+      Export CSV
+    </Button>
   );
 }
