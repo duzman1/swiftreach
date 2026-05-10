@@ -16,12 +16,17 @@ import { getStripe, getPlanByPriceId } from "@/lib/stripe";
 import { resetMonthlyUsage } from "@/lib/usageCheck";
 
 // The Stripe SDK shifts which fields live on Subscription vs SubscriptionItem
-// across versions (e.g. v17+ moved current_period_* and removed
-// invoice.subscription as a top-level field). Rather than pin to a single
-// version's type, narrow at usage sites with these shape extensions.
+// across versions. v17+ moved current_period_* onto each SubscriptionItem
+// and removed invoice.subscription as a top-level field. We read with both
+// shapes to stay forward-compatible.
 type SubLegacy = Stripe.Subscription & {
-  current_period_start: number;
-  current_period_end: number;
+  current_period_start?: number;
+  current_period_end?: number;
+};
+
+type SubscriptionItemLegacy = Stripe.SubscriptionItem & {
+  current_period_start?: number;
+  current_period_end?: number;
 };
 
 type InvoiceWithSub = Stripe.Invoice & {
@@ -32,6 +37,26 @@ function readSubscriptionId(invoice: InvoiceWithSub): string | null {
   const s = invoice.subscription;
   if (!s) return null;
   return typeof s === "string" ? s : s.id;
+}
+
+/**
+ * Pull current_period_{start,end} from wherever the installed Stripe SDK
+ * surfaces them. Older API versions: top-level on Subscription. Newer (v17+):
+ * on each SubscriptionItem. Returns Unix seconds or undefined.
+ */
+function readCurrentPeriod(sub: SubLegacy): {
+  start?: number;
+  end?: number;
+} {
+  // Newer shape — read from the first item.
+  const item = sub.items?.data?.[0] as SubscriptionItemLegacy | undefined;
+  const itemStart = item?.current_period_start;
+  const itemEnd = item?.current_period_end;
+  if (itemStart || itemEnd) {
+    return { start: itemStart, end: itemEnd };
+  }
+  // Legacy shape — fall back to top-level.
+  return { start: sub.current_period_start, end: sub.current_period_end };
 }
 
 export const dynamic = "force-dynamic";
@@ -80,6 +105,7 @@ export async function POST(req: NextRequest) {
         // Resolve plan from priceId rather than trusting metadata alone — if
         // the user upgraded via the Customer Portal, metadata may be stale.
         const plan = getPlanByPriceId(priceId)?.id ?? sub.metadata?.plan ?? "free";
+        const period = readCurrentPeriod(sub);
         await prisma.user.update({
           where: { id: userId },
           data: {
@@ -87,12 +113,8 @@ export async function POST(req: NextRequest) {
             stripeSubscriptionId: sub.id,
             stripeSubscriptionStatus: sub.status,
             stripePriceId: priceId,
-            currentPeriodStart: sub.current_period_start
-              ? new Date(sub.current_period_start * 1000)
-              : null,
-            currentPeriodEnd: sub.current_period_end
-              ? new Date(sub.current_period_end * 1000)
-              : null,
+            currentPeriodStart: period.start ? new Date(period.start * 1000) : null,
+            currentPeriodEnd: period.end ? new Date(period.end * 1000) : null,
             cancelAtPeriodEnd: sub.cancel_at_period_end,
           },
         });
