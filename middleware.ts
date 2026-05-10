@@ -7,6 +7,12 @@
 // For unauthenticated requests to protected ROUTES we redirect to /sign-in
 // (better UX than Clerk's default 404). For unauthenticated requests to
 // protected APIs we 401 with JSON so client fetches see a useful error.
+//
+// /admin/* is auth-gated here AND email-allowlist-gated server-side via
+// lib/adminAuth.ts (every admin route + the admin layout). We don't do the
+// email check at the edge because Clerk's sessionClaims.email isn't
+// populated by default — the safer place is the route handler with
+// currentUser().
 
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
@@ -21,12 +27,18 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
-  if (isPublicRoute(request)) return;
+  // Forward the pathname so server layouts/components can branch on it
+  // (e.g. root layout needs to know not to wrap /admin routes in user chrome).
+  const url = new URL(request.url);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", url.pathname);
+  const passThrough = NextResponse.next({ request: { headers: requestHeaders } });
+
+  if (isPublicRoute(request)) return passThrough;
 
   const { userId } = await auth();
-  if (userId) return; // signed in — let the route render
+  if (userId) return passThrough; // signed in — let the route render
 
-  const url = new URL(request.url);
   const pathname = url.pathname;
 
   // API requests get a JSON 401 instead of an HTML redirect.

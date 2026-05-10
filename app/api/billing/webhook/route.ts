@@ -14,6 +14,7 @@ import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { getStripe, getPlanByPriceId } from "@/lib/stripe";
 import { resetMonthlyUsage } from "@/lib/usageCheck";
+import { logError } from "@/lib/errorLog";
 
 // The Stripe SDK shifts which fields live on Subscription vs SubscriptionItem
 // across versions. v17+ moved current_period_* onto each SubscriptionItem
@@ -173,6 +174,10 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("Stripe webhook handler error:", err);
+    // Surface to /admin/system → Errors. Don't include the request body
+    // (it's signed-but-public Stripe data; nothing sensitive, but still
+    // noisy). The route + message + stack is enough.
+    await logError("POST /api/billing/webhook", err);
     // Return 500 so Stripe retries — DB hiccup, transient downstream, etc.
     return bad(500, "Handler error");
   }

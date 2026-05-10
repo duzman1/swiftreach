@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { logError } from "@/lib/errorLog";
 
 export const dynamic = "force-dynamic";
 
@@ -103,8 +104,11 @@ export async function POST(
         },
         data: updates,
       });
-    } catch {
-      // continue — best-effort per status update
+    } catch (err) {
+      // Log but continue — one bad status shouldn't drop the rest of the batch.
+      await logError("POST /api/webhook/[userId]", err, {
+        userId: params.userId,
+      });
     }
   }
 

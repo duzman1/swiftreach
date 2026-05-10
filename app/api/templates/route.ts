@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { checkTemplateLimit } from "@/lib/usageCheck";
+import { isUserSuspended, suspendedResponse } from "@/lib/suspendCheck";
 import type { FormatRule } from "@/lib/buildMessage";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,9 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return handleApiError(err, "POST /api/templates");
   }
+
+  // Admin moderation: refuse template creation for suspended accounts.
+  if (await isUserSuspended(userId)) return suspendedResponse();
 
   let body: CreateTemplateBody;
   try {

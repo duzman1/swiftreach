@@ -62,6 +62,11 @@ model User {
   messagesUsedThisMonth Int      @default(0)
   usagePeriodStart      DateTime @default(now())
 
+  // ── Moderation (Phase 5 admin) ─────────────────────────────────────────
+  // When true, send + template-create routes return 403 with a support copy.
+  // Toggled from /admin/users/[id]/suspend.
+  suspended Boolean @default(false)
+
   campaigns Campaign[]
   templates MessageTemplate[]
 
@@ -143,4 +148,36 @@ model Settings {
   id                 String @id @default("singleton")
   defaultCountryCode String @default("1")
   defaultDelayMs     Int    @default(2000)
+}
+
+// ── Phase 5: admin observability ─────────────────────────────────────────
+// Captured by lib/errorLog.ts in catch blocks of critical routes (send,
+// webhooks, settings). Surfaced in /admin/system. Should NEVER contain
+// decrypted credentials — log the route name + sanitized message only.
+model ErrorLog {
+  id        String   @id @default(cuid())
+  route     String
+  message   String
+  stack     String?
+  userId    String?
+  severity  String   @default("error") // error | warning
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([severity])
+}
+
+// In-app banner created in /admin/announcements. Only one row should be
+// active at any time — publishing a new banner deactivates existing ones
+// (handled in the API route's transaction).
+model Announcement {
+  id        String   @id @default(cuid())
+  message   String
+  type      String   @default("info") // info | warning | success
+  target    String   @default("all")  // all | free | paid
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
 }

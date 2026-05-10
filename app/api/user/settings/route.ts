@@ -16,6 +16,7 @@ import { requireUser } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { encrypt, maskToken } from "@/lib/encrypt";
 import { DEFAULT_API_VERSION } from "@/lib/whatsapp";
+import { logError } from "@/lib/errorLog";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,7 @@ export async function GET() {
       },
     });
   } catch (err) {
+    await logError("GET /api/user/settings", err);
     return handleApiError(err, "GET /api/user/settings");
   }
 }
@@ -148,6 +150,7 @@ export async function PUT(req: NextRequest) {
       },
     });
   } catch (err) {
+    await logError("PUT /api/user/settings", err);
     return handleApiError(err, "PUT /api/user/settings");
   }
 }

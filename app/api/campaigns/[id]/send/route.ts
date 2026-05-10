@@ -12,6 +12,7 @@ import type { FormatRule } from "@/lib/buildMessage";
 import { requireUserId } from "@/lib/auth";
 import { decrypt } from "@/lib/encrypt";
 import { checkMessageLimit, incrementMessageUsage } from "@/lib/usageCheck";
+import { logError } from "@/lib/errorLog";
 
 export const dynamic = "force-dynamic";
 // Vercel Hobby plan caps function maxDuration at 300s. If you upgrade to Pro,
@@ -40,6 +41,19 @@ export async function GET(
     userId = await requireUserId();
   } catch {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Admin moderation: a suspended account can't send. Cheap select-only
+  // lookup; the full user record is loaded a few lines down anyway.
+  const accountState = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { suspended: true },
+  });
+  if (accountState?.suspended) {
+    return new Response(
+      "Your account has been suspended. Please contact support@swiftreach.app.",
+      { status: 403 }
+    );
   }
 
   const campaign = await prisma.campaign.findUnique({
@@ -284,6 +298,11 @@ export async function GET(
           message: err instanceof Error ? err.message : "Stream error",
         });
         await finalize("failed");
+        // Surface to /admin/system → Errors. Best-effort: errorLog.ts
+        // swallows its own failures so we don't mask the real issue.
+        await logError(`GET /api/campaigns/${campaignId}/send`, err, {
+          userId: userIdLocal,
+        });
       } finally {
         close();
       }
