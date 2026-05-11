@@ -47,6 +47,9 @@ export default async function AdminOverviewPage() {
   const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
+  // All campaign + user queries here are platform-wide — NO userId filter.
+  // We compute both 30d windows AND all-time totals so the dashboard never
+  // reads "0" just because activity is older than 30 days.
   const [
     totalUsers,
     activeSubscribers,
@@ -55,8 +58,10 @@ export default async function AdminOverviewPage() {
     pastDue,
     suspendedCount,
     planCounts,
+    totalCampaigns,
     campaigns30d,
-    campaignAggregate,
+    campaignAggregateAllTime,
+    campaignAggregate30d,
     recentSignups,
     pastDueUsers,
     recentUsersForGrowth,
@@ -69,7 +74,11 @@ export default async function AdminOverviewPage() {
     prisma.user.count({ where: { stripeSubscriptionStatus: "past_due" } }),
     prisma.user.count({ where: { suspended: true } }),
     prisma.user.groupBy({ by: ["plan"], _count: { plan: true } }),
+    prisma.campaign.count(),
     prisma.campaign.count({ where: { createdAt: { gte: since30 } } }),
+    prisma.campaign.aggregate({
+      _sum: { sentCount: true, failedCount: true },
+    }),
     prisma.campaign.aggregate({
       where: { createdAt: { gte: since30 } },
       _sum: { sentCount: true, failedCount: true },
@@ -125,8 +134,9 @@ export default async function AdminOverviewPage() {
     { name: "Growth", value: planBreakdown.growth },
   ];
 
-  const messagesSent30d = campaignAggregate._sum.sentCount ?? 0;
-  const messagesFailed30d = campaignAggregate._sum.failedCount ?? 0;
+  const messagesSent30d = campaignAggregate30d._sum.sentCount ?? 0;
+  const messagesFailed30d = campaignAggregate30d._sum.failedCount ?? 0;
+  const messagesSentAllTime = campaignAggregateAllTime._sum.sentCount ?? 0;
 
   return (
     <div className="space-y-8">
@@ -158,9 +168,9 @@ export default async function AdminOverviewPage() {
           icon={TrendingUp}
         />
         <StatCard
-          label="Campaigns (30d)"
-          value={formatNumber(campaigns30d)}
-          delta={`${formatNumber(messagesSent30d)} messages sent`}
+          label="Campaigns"
+          value={formatNumber(totalCampaigns)}
+          delta={`${formatNumber(campaigns30d)} in last 30 days · ${formatNumber(messagesSentAllTime)} messages sent all-time`}
           icon={Send}
         />
         <StatCard

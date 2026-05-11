@@ -1,13 +1,46 @@
-// Cross-user campaign list. Server-rendered for the first page, no
-// client-side filtering — admins rarely need to drill in here, and when
-// they do the user detail page has the user's own campaign tab.
+"use client";
 
+// Cross-user campaign list. Fetches /api/admin/campaigns so the API is the
+// single source of truth — anything you can see in this UI is reproducible
+// by curling the API. The route applies no userId filter, so admins always
+// see every user's campaigns.
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/adminAuth";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { formatNumber } from "@/lib/utils";
 
-export const dynamic = "force-dynamic";
+interface CampaignRow {
+  id: string;
+  name: string;
+  mode: string;
+  status: string;
+  totalCount: number;
+  sentCount: number;
+  failedCount: number;
+  createdAt: string;
+  completedAt: string | null;
+  user: { id: string; email: string; firstName: string | null; lastName: string | null } | null;
+}
+
+interface Summary {
+  totalAllTime: number;
+  last30: number;
+  messagesSentAllTime: number;
+  messagesFailedAllTime: number;
+}
+
+interface ListResponse {
+  ok: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  campaigns: CampaignRow[];
+  summary: Summary;
+  error?: string;
+}
 
 const STATUS_BADGE: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700",
@@ -18,41 +51,79 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: "bg-slate-100 text-slate-600",
 };
 
-export default async function AdminCampaignsPage() {
-  await requireAdmin();
+export default function AdminCampaignsPage() {
+  const router = useRouter();
+  const params = useSearchParams();
 
-  const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const [campaigns, total, last30, totals] = await Promise.all([
-    prisma.campaign.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 50,
-      select: {
-        id: true,
-        name: true,
-        mode: true,
-        status: true,
-        totalCount: true,
-        sentCount: true,
-        failedCount: true,
-        createdAt: true,
-        completedAt: true,
-        user: { select: { id: true, email: true } },
-      },
-    }),
-    prisma.campaign.count(),
-    prisma.campaign.count({ where: { createdAt: { gte: since30 } } }),
-    prisma.campaign.aggregate({
-      _sum: { sentCount: true, failedCount: true },
-    }),
-  ]);
+  const [status, setStatus] = useState(params.get("status") ?? "");
+  const page = parseInt(params.get("page") ?? "1", 10) || 1;
+
+  const [data, setData] = useState<ListResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sp = new URLSearchParams();
+    if (status) sp.set("status", status);
+    router.replace(`/admin/campaigns${sp.toString() ? `?${sp.toString()}` : ""}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    const sp = new URLSearchParams(params.toString());
+    fetch(`/api/admin/campaigns?${sp.toString()}`)
+      .then((r) => r.json())
+      .then((j: ListResponse) => {
+        if (cancelled) return;
+        if (!j.ok) setErr(j.error ?? "Failed to load campaigns");
+        else setData(j);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : "Network error");
+      })
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [params]);
+
+  function goToPage(n: number) {
+    const sp = new URLSearchParams(params.toString());
+    sp.set("page", String(n));
+    router.replace(`/admin/campaigns?${sp.toString()}`);
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Campaigns</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {total.toLocaleString()} total · {last30.toLocaleString()} in last 30 days · {formatNumber(totals._sum.sentCount ?? 0)} messages sent all-time
+          {data?.summary
+            ? `${formatNumber(data.summary.totalAllTime)} total · ${formatNumber(data.summary.last30)} in last 30 days · ${formatNumber(data.summary.messagesSentAllTime)} messages sent all-time`
+            : "Loading…"}
         </p>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-slate-500">Status:</label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="h-9 rounded-md border border-slate-200 px-3 text-sm bg-white"
+          >
+            <option value="">All statuses</option>
+            <option value="draft">Draft</option>
+            <option value="sending">Sending</option>
+            <option value="paused">Paused</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -70,14 +141,32 @@ export default async function AdminCampaignsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {campaigns.length === 0 ? (
+              {loading && !data && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
-                    No campaigns yet
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                    Loading…
                   </td>
                 </tr>
-              ) : (
-                campaigns.map((c) => (
+              )}
+              {err && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-red-600">
+                    {err}
+                  </td>
+                </tr>
+              )}
+              {data?.campaigns.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
+                    No campaigns match these filters
+                  </td>
+                </tr>
+              )}
+              {data?.campaigns.map((c) => {
+                const ownerName = c.user
+                  ? [c.user.firstName, c.user.lastName].filter(Boolean).join(" ")
+                  : "";
+                return (
                   <tr key={c.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-slate-800 font-medium">{c.name}</td>
                     <td className="px-4 py-3">
@@ -89,7 +178,10 @@ export default async function AdminCampaignsPage() {
                           {c.user.email}
                         </Link>
                       ) : (
-                        <span className="text-xs text-slate-400">—</span>
+                        <span className="text-xs text-slate-400">— (orphan)</span>
+                      )}
+                      {ownerName && (
+                        <div className="text-[11px] text-slate-500">{ownerName}</div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">{c.mode}</td>
@@ -116,11 +208,37 @@ export default async function AdminCampaignsPage() {
                       {new Date(c.createdAt).toLocaleDateString()}
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })}
             </tbody>
           </table>
         </div>
+
+        {data && data.totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 bg-slate-50">
+            <div className="text-xs text-slate-500">
+              Page {data.page} of {data.totalPages} · {data.total.toLocaleString()} matching
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                disabled={page <= 1}
+                onClick={() => goToPage(page - 1)}
+                className="p-1.5 rounded-md hover:bg-slate-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                disabled={page >= data.totalPages}
+                onClick={() => goToPage(page + 1)}
+                className="p-1.5 rounded-md hover:bg-slate-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                aria-label="Next page"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

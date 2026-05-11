@@ -20,13 +20,18 @@ export async function GET() {
     const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
+    // All counts query across ALL users (no userId filter) — admins see the
+    // whole platform. We compute both 30d windows AND all-time totals so the
+    // Overview never reads "0" just because activity is older than 30 days.
     const [
       totalUsers,
       activeSubscribers,
       newUsers30d,
       planCounts,
+      totalCampaigns,
       campaigns30d,
-      messagesAgg,
+      messagesAggAllTime,
+      messagesAgg30d,
       pastDue,
       suspendedCount,
       messagesUsedAgg,
@@ -38,7 +43,11 @@ export async function GET() {
         by: ["plan"],
         _count: { plan: true },
       }),
+      prisma.campaign.count(),
       prisma.campaign.count({ where: { createdAt: { gte: since30 } } }),
+      prisma.campaign.aggregate({
+        _sum: { sentCount: true, failedCount: true },
+      }),
       prisma.campaign.aggregate({
         where: { createdAt: { gte: since30 } },
         _sum: { sentCount: true, failedCount: true },
@@ -75,9 +84,12 @@ export async function GET() {
         newUsers30d,
         newUsers7d,
         mrr,
+        totalCampaigns,
         campaigns30d,
-        messagesSent30d: messagesAgg._sum.sentCount ?? 0,
-        messagesFailed30d: messagesAgg._sum.failedCount ?? 0,
+        messagesSentAllTime: messagesAggAllTime._sum.sentCount ?? 0,
+        messagesFailedAllTime: messagesAggAllTime._sum.failedCount ?? 0,
+        messagesSent30d: messagesAgg30d._sum.sentCount ?? 0,
+        messagesFailed30d: messagesAgg30d._sum.failedCount ?? 0,
         messagesUsedThisMonth: messagesUsedAgg._sum.messagesUsedThisMonth ?? 0,
         pastDue,
         suspended: suspendedCount,
