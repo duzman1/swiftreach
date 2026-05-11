@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Calendar, Repeat, X, Play, Loader2, Clock, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { UpgradePrompt } from "@/components/shared/UpgradePrompt";
 
 interface ScheduledRow {
   id: string;
@@ -66,12 +67,17 @@ export default function ScheduledPage() {
   const [list, setList] = useState<ScheduledRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [upgradeRequired, setUpgradeRequired] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
       const r = await fetch("/api/scheduled");
       const j = await r.json();
+      if (r.status === 403 && j.upgradeRequired) {
+        setUpgradeRequired(true);
+        return;
+      }
       if (!j.ok) throw new Error(j.error ?? "Failed to load");
       setList(j.scheduled);
     } catch (e: unknown) {
@@ -123,6 +129,23 @@ export default function ScheduledPage() {
   const past = (list ?? []).filter(
     (r) => r.status === "completed" || r.status === "cancelled" || r.status === "failed"
   );
+
+  if (upgradeRequired) {
+    return (
+      <div className="space-y-6">
+        <header className="max-w-5xl">
+          <h1 className="text-3xl font-bold tracking-tight">Scheduled Campaigns</h1>
+          <p className="text-muted-foreground mt-1">
+            Send a campaign at a future time, or set it to repeat automatically.
+          </p>
+        </header>
+        <UpgradePrompt
+          feature="Scheduled Campaigns"
+          description="Pick a date + time, or set a campaign to repeat daily, weekly, or monthly. The cron fires automatically — no need to leave a tab open."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-5xl">

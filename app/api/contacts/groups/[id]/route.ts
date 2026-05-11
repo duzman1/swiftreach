@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
+import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,8 @@ export async function PUT(
 ) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "contact_book");
+    if (gate) return gate;
     if (!(await loadOwned(params.id, userId))) return bad("Group not found", 404);
 
     let body: UpdateBody;
@@ -66,6 +69,8 @@ export async function DELETE(
 ) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "contact_book");
+    if (gate) return gate;
     if (!(await loadOwned(params.id, userId))) return bad("Group not found", 404);
 
     // Strip this group id from every contact that has it. We could be

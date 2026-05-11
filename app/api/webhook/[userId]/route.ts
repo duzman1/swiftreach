@@ -130,21 +130,70 @@ export async function POST(
     }
   }
 
-  // ── Inbound messages — opt-out detection ────────────────────────────────
+  // ── Inbound messages — opt-out detection + inbox storage ───────────────
   for (const m of inbound) {
     try {
       const text = m.text?.body ?? "";
-      const keyword = detectOptOutKeyword(text);
-      if (!keyword) {
-        // Non-keyword inbound — no-op for now. Future inbox feature can
-        // hook in here.
-        continue;
-      }
       // Meta's `from` is E.164 digits without the + prefix; normalisePhone
       // tolerates either shape and returns digits only.
       const phone = normalizePhone(m.from, "1");
       if (!phone) continue;
-      await processOptOut(params.userId, phone, keyword, "whatsapp");
+
+      const keyword = detectOptOutKeyword(text);
+      if (keyword) {
+        await processOptOut(params.userId, phone, keyword, "whatsapp");
+        // Opt-outs do NOT land in the inbox — they're a system signal,
+        // not a conversation. /admin → opt-out logs is the audit trail.
+        continue;
+      }
+
+      // Non-keyword reply: store as InboundMessage so /inbox can render it.
+      // Look up the contact's name from SavedContact (snapshot at insert
+      // time — SavedContact name edits don't propagate to old inbox rows).
+      const saved = await prisma.savedContact.findUnique({
+        where: {
+          userId_phoneNumber: { userId: params.userId, phoneNumber: phone },
+        },
+        select: { data: true },
+      });
+      let contactName: string | null = null;
+      if (saved?.data) {
+        try {
+          const data: Record<string, string> = JSON.parse(saved.data);
+          contactName =
+            data["Name"] ||
+            data["name"] ||
+            data["FullName"] ||
+            data["Full Name"] ||
+            data["full_name"] ||
+            null;
+        } catch {
+          contactName = null;
+        }
+      }
+
+      // Most recent campaign that sent to this phone — for the
+      // "Reply to: [campaign name]" header in the detail panel.
+      const lastContact = await prisma.contact.findFirst({
+        where: {
+          phoneNumber: phone,
+          campaign: { userId: params.userId },
+          status: { in: ["sent", "delivered", "read"] },
+        },
+        orderBy: { sentAt: "desc" },
+        select: { campaignId: true },
+      });
+
+      await prisma.inboundMessage.create({
+        data: {
+          userId: params.userId,
+          fromPhone: phone,
+          contactName,
+          messageText: text,
+          messageId: m.id ?? null,
+          campaignId: lastContact?.campaignId ?? null,
+        },
+      });
     } catch (err) {
       await logError("POST /api/webhook/[userId] inbound", err, {
         userId: params.userId,

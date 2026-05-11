@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { isUserSuspended, suspendedResponse } from "@/lib/suspendCheck";
+import { requirePaidPlan } from "@/lib/planGate";
 import type { VariableMapping } from "@/lib/whatsapp";
 import type { FormatRule } from "@/lib/buildMessage";
 
@@ -42,6 +43,8 @@ function bad(message: string, status = 400) {
 export async function GET() {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "scheduled_campaigns");
+    if (gate) return gate;
     const list = await prisma.scheduledCampaign.findMany({
       where: { userId },
       orderBy: { scheduledFor: "asc" },
@@ -55,6 +58,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "scheduled_campaigns");
+    if (gate) return gate;
     if (await isUserSuspended(userId)) return suspendedResponse();
 
     let body: CreateScheduledBody;

@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { normalizePhone, isValidPhone } from "@/lib/phoneUtils";
+import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,8 @@ function bad(message: string, status = 400) {
 export async function GET(req: NextRequest) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "contact_book");
+    if (gate) return gate;
 
     const url = new URL(req.url);
     const search = url.searchParams.get("q")?.trim() ?? "";
@@ -77,6 +80,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "contact_book");
+    if (gate) return gate;
 
     let body: CreateBody;
     try {

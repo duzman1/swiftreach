@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
+import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,8 @@ function bad(message: string, status = 400) {
 export async function GET() {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "contact_book");
+    if (gate) return gate;
     const groups = await prisma.contactGroup.findMany({
       where: { userId },
       orderBy: { name: "asc" },
@@ -35,6 +38,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "contact_book");
+    if (gate) return gate;
 
     let body: CreateBody;
     try {

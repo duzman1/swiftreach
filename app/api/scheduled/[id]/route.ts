@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
+import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,8 @@ export async function PUT(
 ) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "scheduled_campaigns");
+    if (gate) return gate;
     const existing = await loadOwned(params.id, userId);
     if (!existing) return bad("Scheduled campaign not found", 404);
 
@@ -106,6 +109,8 @@ export async function DELETE(
 ) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "scheduled_campaigns");
+    if (gate) return gate;
     const existing = await loadOwned(params.id, userId);
     if (!existing) return bad("Scheduled campaign not found", 404);
 

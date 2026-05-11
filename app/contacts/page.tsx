@@ -27,6 +27,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UpgradePrompt } from "@/components/shared/UpgradePrompt";
 
 interface Contact {
   id: string;
@@ -69,11 +70,16 @@ export default function ContactsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<Contact | null>(null);
   const [groupModal, setGroupModal] = useState<{ mode: "create" | "edit"; group?: Group } | null>(null);
+  const [upgradeRequired, setUpgradeRequired] = useState(false);
 
   async function loadGroups() {
     try {
       const r = await fetch("/api/contacts/groups");
       const j = await r.json();
+      if (r.status === 403 && j.upgradeRequired) {
+        setUpgradeRequired(true);
+        return;
+      }
       if (!j.ok) throw new Error(j.error ?? "Failed");
       setGroups(j.groups);
     } catch (e: unknown) {
@@ -91,6 +97,10 @@ export default function ContactsPage() {
       sp.set("page", String(page));
       const r = await fetch(`/api/contacts?${sp.toString()}`);
       const j = await r.json();
+      if (r.status === 403 && j.upgradeRequired) {
+        setUpgradeRequired(true);
+        return;
+      }
       if (!j.ok) throw new Error(j.error ?? "Failed");
       setContacts(j.contacts);
       setTotalPages(j.totalPages);
@@ -210,6 +220,23 @@ export default function ContactsPage() {
       else next.add(id);
       return next;
     });
+  }
+
+  if (upgradeRequired) {
+    return (
+      <div className="space-y-6">
+        <header className="max-w-6xl">
+          <h1 className="text-3xl font-bold tracking-tight">Contact Book</h1>
+          <p className="text-muted-foreground mt-1">
+            Save contacts once, reuse them across campaigns.
+          </p>
+        </header>
+        <UpgradePrompt
+          feature="Contact Book"
+          description="Save your contacts permanently — pick from your saved list or a group when sending a campaign, instead of re-uploading the same CSV every time."
+        />
+      </div>
+    );
   }
 
   return (

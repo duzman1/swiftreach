@@ -72,6 +72,8 @@ model User {
   scheduledCampaigns ScheduledCampaign[]
   savedContacts      SavedContact[]
   contactGroups      ContactGroup[]
+  inboundMessages    InboundMessage[]
+  outboundReplies    OutboundReply[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -277,4 +279,50 @@ model OptOutLog {
 
   @@index([userId])
   @@index([userId, createdAt])
+}
+
+// ── Phase 6: two-way messaging (inbox) ───────────────────────────────────
+// Every non-keyword inbound WhatsApp message lands here. Opt-out keywords
+// are handled separately by lib/optOut.ts and DO NOT create an inbox row.
+//
+// `contactName` is denormalised at insert time so the inbox list doesn't
+// need to JOIN SavedContact for the common rendering case. If the user
+// later edits the contact's Name field, old inbox rows keep the snapshot.
+//
+// `campaignId` is best-effort — the most recent campaign that sent to
+// this phone gets credit. Useful for "you got 3 replies to MFAC Meeting".
+model InboundMessage {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromPhone   String
+  contactName String?
+  messageText String
+  messageId   String? // Meta's wamid, when present
+  read        Boolean   @default(false)
+  readAt      DateTime?
+  repliedAt   DateTime?
+  campaignId  String?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+}
+
+// Replies sent from the inbox detail panel. Stored separately from the
+// Campaign/Contact pipeline so inbox stats (replies sent, response rate)
+// stay clean.
+model OutboundReply {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inboundMessageId String
+  toPhone          String
+  messageText      String
+  sentAt           DateTime @default(now())
+  whatsappMsgId    String?
+  status           String   @default("sent") // sent | failed
+
+  @@index([userId])
+  @@index([inboundMessageId])
 }

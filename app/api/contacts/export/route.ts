@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { PLANS } from "@/lib/stripe";
+import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,8 @@ function csvEscape(v: string): string {
 export async function POST(req: NextRequest) {
   try {
     const user = await requireUser();
+    const gate = await requirePaidPlan(user.id, "contact_book");
+    if (gate) return gate;
     const planLimits = PLANS[user.plan as keyof typeof PLANS]?.limits;
     if (planLimits && !planLimits.csvExport) {
       return NextResponse.json(

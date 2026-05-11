@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { isUserSuspended, suspendedResponse } from "@/lib/suspendCheck";
+import { requirePaidPlan } from "@/lib/planGate";
 import { materializeScheduledCampaign } from "@/lib/materializeScheduled";
 import { computeNextRunAt } from "@/lib/recurrence";
 
@@ -24,6 +25,8 @@ export async function POST(
 ) {
   try {
     const userId = await requireUserId();
+    const gate = await requirePaidPlan(userId, "scheduled_campaigns");
+    if (gate) return gate;
     if (await isUserSuspended(userId)) return suspendedResponse();
 
     const sched = await prisma.scheduledCampaign.findUnique({ where: { id: params.id } });
