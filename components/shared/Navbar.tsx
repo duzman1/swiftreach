@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Send, History, FileText, Settings, MessageCircle, CreditCard } from "lucide-react";
+import { LayoutDashboard, Send, History, FileText, Settings, MessageCircle, CreditCard, BookOpen, Clock } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { PlanBadge } from "./PlanBadge";
@@ -10,7 +10,9 @@ import { PlanBadge } from "./PlanBadge";
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/send", label: "New Campaign", icon: Send },
+  { href: "/contacts", label: "Contacts", icon: BookOpen },
   { href: "/campaigns", label: "Campaigns", icon: History },
+  { href: "/scheduled", label: "Scheduled", icon: Clock },
   { href: "/templates", label: "Templates", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/billing", label: "Billing", icon: CreditCard },

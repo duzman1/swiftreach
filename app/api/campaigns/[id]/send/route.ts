@@ -111,6 +111,16 @@ export async function GET(
   const creds = userCreds;
   const userIdLocal = userId;
 
+  // ── Opt-out lookup ────────────────────────────────────────────────────
+  // Pull every opted-out phone for this user up front so per-iteration
+  // checks are a Set membership test (O(1)) rather than a DB hit per
+  // contact. The set is captured into the stream closure.
+  const optedOutRows = await prisma.savedContact.findMany({
+    where: { userId, optedOut: true },
+    select: { phoneNumber: true },
+  });
+  const optedOutSet = new Set(optedOutRows.map((r) => r.phoneNumber));
+
   // Mark sending start
   await prisma.campaign.update({
     where: { id: params.id },
@@ -194,6 +204,37 @@ export async function GET(
             await finalize("completed");
             close();
             return;
+          }
+
+          // ── Opt-out suppression ────────────────────────────────────────
+          // If this contact's phone is in the user's opt-out set, mark
+          // skipped instead of sending. Counts toward the campaign's
+          // skipped tally, not failed.
+          if (optedOutSet.has(c.phoneNumber)) {
+            await prisma.contact.update({
+              where: { id: c.id },
+              data: {
+                status: "skipped",
+                errorMessage: "Contact has opted out",
+              },
+            });
+            await prisma.campaign.update({
+              where: { id: campaignId },
+              data: { skippedCount: { increment: 1 } },
+            });
+            processed++;
+            emit("progress", {
+              index: i + 1,
+              total: contacts.length,
+              contactId: c.id,
+              phone: c.phoneNumber,
+              status: "skipped",
+              error: "Contact has opted out",
+            });
+            if (i < contacts.length - 1) {
+              await new Promise((r) => setTimeout(r, delayMs));
+            }
+            continue;
           }
 
           await prisma.contact.update({

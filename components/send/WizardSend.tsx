@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Send, Loader2, Save, FolderOpen } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { CampaignSettings, isCampaignNameInvalid } from "./CampaignSettings";
 import { ContactReviewTable } from "./ContactReviewTable";
 import { ProgressPanel } from "./ProgressPanel";
 import { TemplateMapper } from "./TemplateMapper";
+import { SendTiming, combineToISO, type SendTimingState } from "./SendTiming";
 import {
   ReconciliationSummary,
   type Resolution,
@@ -61,6 +62,30 @@ export function WizardSend() {
   const [campaignName, setCampaignName] = React.useState("");
   const [delayMs, setDelayMs] = React.useState(2000);
   const [filters, setFilters] = React.useState<FilterRule[]>([]);
+
+  // Step 4 — save to contact book (Phase 6). Off by default — opting in
+  // adds every valid row to SavedContact after the campaign is created.
+  const [saveToBook, setSaveToBook] = React.useState(false);
+  const [saveBookGroupName, setSaveBookGroupName] = React.useState("");
+
+  // Step 4 — send timing (Phase 6). Defaults to "send now" so existing
+  // muscle memory still works.
+  const [sendTiming, setSendTiming] = React.useState<SendTimingState>(() => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    return {
+      moment: "now",
+      date: tomorrow.toISOString().slice(0, 10),
+      time: "09:00",
+      timezone:
+        typeof Intl !== "undefined"
+          ? Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles"
+          : "America/Los_Angeles",
+      recurring: false,
+      recurrence: "weekly",
+      recurrenceDay: 1,
+    };
+  });
+  const router = useRouter();
 
   // Step 5 — track which row indices (post-filter) are explicitly skipped
   const [skippedIndices, setSkippedIndices] = React.useState<number[]>([]);
@@ -413,9 +438,116 @@ export function WizardSend() {
     }
   }
 
+  // ── Save campaign contacts into the Contact Book (best-effort) ───────
+  async function maybeSaveToBook() {
+    if (!saveToBook || !parsed) return;
+    try {
+      // Strip skipped rows and build the import payload. Server normalises
+      // the phone again — we just pass the raw values.
+      const payload = {
+        contacts: filteredRows
+          .filter((_, i) => !skippedIndices.includes(i))
+          .map((row) => ({
+            phoneNumber: row[phoneColumn] ?? "",
+            data: Object.fromEntries(
+              Object.entries(row).filter(([k]) => k !== phoneColumn)
+            ),
+          })),
+        defaultCountryCode,
+        groupName: saveBookGroupName.trim() || undefined,
+      };
+      const r = await fetch("/api/contacts/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (j.ok) {
+        toast.success(
+          `Saved ${j.created + j.updated} to Contact Book` +
+            (j.invalid > 0 ? ` (${j.invalid} invalid skipped)` : "")
+        );
+      }
+    } catch {
+      // Non-fatal — campaign already created, don't surface a toast error.
+    }
+  }
+
   // ── Create + start campaign ────────────────────────────────────────────
   async function startCampaign() {
     if (!parsed || !readyToSend) return;
+
+    // Branch: scheduled vs. immediate. Both fire the same shaped wizard
+    // payload, just to different endpoints.
+    if (sendTiming.moment === "schedule") {
+      const iso = combineToISO(sendTiming.date, sendTiming.time);
+      if (!iso) {
+        setCreateError("Pick a valid date and time to schedule.");
+        toast.error("Pick a valid date and time to schedule.");
+        return;
+      }
+      if (new Date(iso).getTime() < Date.now() - 60_000) {
+        setCreateError("Scheduled time must be in the future.");
+        toast.error("Scheduled time must be in the future.");
+        return;
+      }
+
+      setCreating(true);
+      setCreateError(null);
+      try {
+        const body = {
+          name: campaignName.trim(),
+          mode,
+          rawMessage: mode === "freeform" ? template : undefined,
+          templateName: mode === "template" ? templateName : undefined,
+          templateLanguage: mode === "template" ? templateLanguage : undefined,
+          variableMap: mode === "template" ? variableMap : undefined,
+          staticVars: staticVarsObj,
+          formatRules,
+          phoneColumn,
+          delayMs,
+          // Filters were already applied client-side into filteredRows;
+          // strip skipped rows so the schedule fires the exact set the
+          // user reviewed.
+          contacts: filteredRows.filter(
+            (_, i) => !skippedIndices.includes(i)
+          ),
+          scheduledFor: iso,
+          timezone: sendTiming.timezone,
+          recurring: sendTiming.recurring,
+          recurrence: sendTiming.recurring ? sendTiming.recurrence : null,
+          recurrenceDay: sendTiming.recurring ? sendTiming.recurrenceDay : null,
+        };
+        const res = await fetch("/api/scheduled", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          setCreateError(data.error ?? "Failed to schedule campaign");
+          toast.error(data.error ?? "Failed to schedule campaign");
+          return;
+        }
+        toast.success(
+          `Scheduled for ${new Date(iso).toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          })}`
+        );
+        await maybeSaveToBook();
+        setConfirmOpen(false);
+        router.push("/scheduled");
+      } catch (err) {
+        setCreateError(err instanceof Error ? err.message : "Network error");
+      } finally {
+        setCreating(false);
+      }
+      return;
+    }
+
     setCreating(true);
     setCreateError(null);
     try {
@@ -447,6 +579,7 @@ export function WizardSend() {
         return;
       }
       toast.success(`Campaign "${data.campaign.name}" started`);
+      await maybeSaveToBook();
       setRunning(data.campaign);
       setConfirmOpen(false);
     } catch (err) {
@@ -492,7 +625,12 @@ export function WizardSend() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ImportContacts parsed={parsed} onParsed={handleParsed} onClear={handleClear} />
+          <ImportContacts
+            parsed={parsed}
+            onParsed={handleParsed}
+            onClear={handleClear}
+            defaultCountryCode={defaultCountryCode}
+          />
         </CardContent>
       </Card>
 
@@ -629,10 +767,10 @@ export function WizardSend() {
             <CardHeader>
               <CardTitle>Step 4 — Campaign settings</CardTitle>
               <CardDescription>
-                Name, delay between messages, and optional contact filters.
+                Name, delay between messages, send timing, and optional contact filters.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <CampaignSettings
                 parsed={parsed}
                 phoneColumn={phoneColumn}
@@ -646,6 +784,31 @@ export function WizardSend() {
                   setSkippedIndices([]); // filter changes invalidate row indices
                 }}
               />
+              <SendTiming value={sendTiming} onChange={setSendTiming} />
+
+              <div className="rounded-md border bg-zinc-50 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={saveToBook}
+                    onChange={(e) => setSaveToBook(e.target.checked)}
+                  />
+                  Save these contacts to my Contact Book
+                </label>
+                {saveToBook && (
+                  <div className="pl-6 max-w-md">
+                    <Label htmlFor="save-group" className="block mb-1.5 text-xs">
+                      Group name (optional — creates a new group, or omit to save without grouping)
+                    </Label>
+                    <Input
+                      id="save-group"
+                      value={saveBookGroupName}
+                      onChange={(e) => setSaveBookGroupName(e.target.value)}
+                      placeholder="e.g. April 2026 Cohort"
+                    />
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -726,7 +889,7 @@ export function WizardSend() {
                   disabled={!readyToSend}
                 >
                   <Send className="w-4 h-4" />
-                  Start Campaign
+                  {sendTiming.moment === "schedule" ? "Schedule Campaign" : "Start Campaign"}
                 </Button>
               </div>
 
@@ -804,10 +967,13 @@ export function WizardSend() {
             onClick={(e) => e.stopPropagation()}
           >
             <div>
-              <h3 className="text-lg font-semibold">Start campaign?</h3>
+              <h3 className="text-lg font-semibold">
+                {sendTiming.moment === "schedule" ? "Schedule campaign?" : "Start campaign?"}
+              </h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Once started, messages are sent one by one with a {(delayMs / 1000).toFixed(1)}s delay.
-                You can pause or cancel from the progress panel.
+                {sendTiming.moment === "schedule"
+                  ? "Will fire automatically at the scheduled time. You can edit or cancel from the Scheduled page."
+                  : `Once started, messages are sent one by one with a ${(delayMs / 1000).toFixed(1)}s delay. You can pause or cancel from the progress panel.`}
               </p>
             </div>
             <ul className="text-sm space-y-1 border rounded-md p-3 bg-zinc-50">
@@ -815,7 +981,24 @@ export function WizardSend() {
               <li><strong>Mode:</strong> {mode === "freeform" ? "Free-Form Text" : `Meta Template (${templateName})`}</li>
               <li><strong>Will send to:</strong> {willSendCount}</li>
               <li><strong>Delay:</strong> {(delayMs / 1000).toFixed(1)}s</li>
-              <li><strong>Estimated time:</strong> ~{Math.ceil((willSendCount * delayMs) / 60000)} min</li>
+              {sendTiming.moment === "schedule" ? (
+                <>
+                  <li>
+                    <strong>Scheduled for:</strong>{" "}
+                    {sendTiming.date} {sendTiming.time} ({sendTiming.timezone})
+                  </li>
+                  {sendTiming.recurring && (
+                    <li>
+                      <strong>Recurrence:</strong> {sendTiming.recurrence}
+                      {sendTiming.recurrence === "weekly" || sendTiming.recurrence === "monthly"
+                        ? ` (day ${sendTiming.recurrenceDay})`
+                        : ""}
+                    </li>
+                  )}
+                </>
+              ) : (
+                <li><strong>Estimated time:</strong> ~{Math.ceil((willSendCount * delayMs) / 60000)} min</li>
+              )}
             </ul>
             <div className="flex justify-end gap-2">
               <Button
@@ -827,7 +1010,7 @@ export function WizardSend() {
               </Button>
               <Button onClick={startCampaign} disabled={creating} className="gap-2">
                 {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Confirm &amp; Send
+                {sendTiming.moment === "schedule" ? "Confirm & Schedule" : "Confirm & Send"}
               </Button>
             </div>
           </div>

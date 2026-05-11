@@ -18,12 +18,13 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 const isPublicRoute = createRouteMatcher([
-  "/",                    // Landing for logged-out, dashboard for logged-in
+  "/",                          // Landing for logged-out, dashboard for logged-in
   "/sign-in(.*)",
   "/sign-up(.*)",
-  "/api/webhook(.*)",     // Meta WhatsApp webhook (incl. /api/webhook/[userId])
-  "/api/clerk-webhook",   // Clerk user lifecycle webhook
-  "/api/billing/webhook", // Stripe billing webhook
+  "/api/webhook(.*)",           // Meta WhatsApp webhook (incl. /api/webhook/[userId])
+  "/api/clerk-webhook",         // Clerk user lifecycle webhook
+  "/api/billing/webhook",       // Stripe billing webhook
+  "/api/cron/(.*)",             // Vercel Cron — protected by CRON_SECRET header
 ]);
 
 export default clerkMiddleware(async (auth, request) => {

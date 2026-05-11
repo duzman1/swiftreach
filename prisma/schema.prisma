@@ -67,8 +67,11 @@ model User {
   // Toggled from /admin/users/[id]/suspend.
   suspended Boolean @default(false)
 
-  campaigns Campaign[]
-  templates MessageTemplate[]
+  campaigns          Campaign[]
+  templates          MessageTemplate[]
+  scheduledCampaigns ScheduledCampaign[]
+  savedContacts      SavedContact[]
+  contactGroups      ContactGroup[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -180,4 +183,98 @@ model Announcement {
   updatedAt DateTime @updatedAt
 
   @@index([active])
+}
+
+// ── Phase 6: scheduled + recurring campaigns ─────────────────────────────
+// One row per scheduled send. The cron at /api/cron/send-scheduled scans
+// every minute, materialises due rows into a real Campaign + Contact[]
+// graph, and triggers the same send pipeline as an immediate campaign.
+//
+// `contactListData` stores the resolved contact rows as JSON so the cron
+// has everything it needs without re-running CSV parsing or contact-book
+// queries.
+model ScheduledCampaign {
+  id              String  @id @default(cuid())
+  userId          String
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  mode            String  // freeform | template
+  templateName    String?
+  rawMessage      String?
+  staticVars      String  @default("{}")
+  variableMap     String  @default("[]")
+  formatRules     String  @default("{}")
+  phoneColumn     String
+  delayMs         Int     @default(2000)
+  contactListData String  @default("[]") // JSON array of contact row objects
+  status          String  @default("scheduled")
+  // scheduled | running | completed | failed | cancelled
+
+  scheduledFor  DateTime
+  timezone      String    @default("America/Los_Angeles")
+  recurring     Boolean   @default(false)
+  recurrence    String? // daily | weekly | monthly
+  recurrenceDay Int? // weekly: 0=Sun..6=Sat, monthly: 1..31
+  lastRunAt     DateTime?
+  nextRunAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status, scheduledFor])
+}
+
+// ── Phase 6: contact book ────────────────────────────────────────────────
+// Persistent per-user contact storage. The unique (userId, phoneNumber)
+// constraint prevents duplicates when re-importing the same CSV. `data`
+// is free-form JSON of every column the user wants to remember about the
+// contact (e.g. {"Name":"John","Balance":150}).
+model SavedContact {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phoneNumber String
+  data        String    @default("{}") // JSON of arbitrary fields
+  groupIds    String    @default("[]") // JSON array of ContactGroup ids
+  optedOut    Boolean   @default(false)
+  optedOutAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, phoneNumber])
+  @@index([userId])
+  @@index([userId, optedOut])
+}
+
+// Soft container for grouping contacts ("VIPs", "March Cohort"). Membership
+// is denormalised onto SavedContact.groupIds to keep group selection cheap
+// without a join table.
+model ContactGroup {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?
+  color        String   @default("#25D366")
+  contactCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Audit trail of every detected opt-out. Append-only — used by /admin and
+// future analytics surfaces. Do NOT delete rows when re-opting a contact
+// in; the contact's optedOut flag is the live state, this table is history.
+model OptOutLog {
+  id          String   @id @default(cuid())
+  userId      String
+  phoneNumber String
+  keyword     String // exact word the user sent ("STOP", "UNSUBSCRIBE", ...)
+  source      String   @default("whatsapp")
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, createdAt])
 }

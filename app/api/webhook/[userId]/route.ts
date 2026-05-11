@@ -1,15 +1,24 @@
 // Per-user WhatsApp delivery webhook. Each user pastes a URL of the form
 //   https://www.swiftreach.app/api/webhook/<userId>
 // into Meta's webhook configuration. Meta then hits this endpoint with that
-// user's verify token (GET handshake) or status updates (POST).
+// user's verify token (GET handshake) or status updates / inbound messages
+// (POST).
 //
 // We scope every status update to contacts that belong to a campaign owned
 // by the user in the URL — defense in depth: even if Meta misrouted a
 // callback, we wouldn't update some other user's records.
+//
+// Phase 6: also processes inbound messages. If the body matches an opt-out
+// keyword (STOP, UNSUBSCRIBE, etc.) we mark the contact as opted out and
+// scrub them from any pending scheduled campaigns. Non-keyword inbound
+// messages are currently silent — a future inbox feature can pick these
+// up.
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logError } from "@/lib/errorLog";
+import { detectOptOutKeyword, processOptOut } from "@/lib/optOut";
+import { normalizePhone } from "@/lib/phoneUtils";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +30,20 @@ interface StatusUpdate {
   errors?: Array<{ code: number; title: string; message?: string }>;
 }
 
+interface InboundMessage {
+  id?: string;
+  from: string; // E.164 without leading +
+  type?: string;
+  timestamp?: string;
+  text?: { body?: string };
+}
+
 interface WebhookPayload {
   entry?: Array<{
     changes?: Array<{
       value?: {
         statuses?: StatusUpdate[];
+        messages?: InboundMessage[];
       };
     }>;
   }>;
@@ -62,7 +80,7 @@ export async function GET(
   return new Response("Forbidden", { status: 403 });
 }
 
-// ── POST — delivery / read / fail status callbacks ───────────────────────────
+// ── POST — delivery / read / fail status callbacks + inbound messages ────────
 export async function POST(
   req: NextRequest,
   { params }: { params: { userId: string } }
@@ -75,15 +93,15 @@ export async function POST(
   }
 
   const statuses: StatusUpdate[] = [];
+  const inbound: InboundMessage[] = [];
   for (const entry of body.entry ?? []) {
     for (const change of entry.changes ?? []) {
-      for (const s of change.value?.statuses ?? []) {
-        statuses.push(s);
-      }
+      for (const s of change.value?.statuses ?? []) statuses.push(s);
+      for (const m of change.value?.messages ?? []) inbound.push(m);
     }
   }
 
-  // Scope every update to contacts whose campaign is owned by params.userId.
+  // ── Status updates ──────────────────────────────────────────────────────
   for (const s of statuses) {
     try {
       const updates: Record<string, unknown> = { status: s.status };
@@ -107,6 +125,28 @@ export async function POST(
     } catch (err) {
       // Log but continue — one bad status shouldn't drop the rest of the batch.
       await logError("POST /api/webhook/[userId]", err, {
+        userId: params.userId,
+      });
+    }
+  }
+
+  // ── Inbound messages — opt-out detection ────────────────────────────────
+  for (const m of inbound) {
+    try {
+      const text = m.text?.body ?? "";
+      const keyword = detectOptOutKeyword(text);
+      if (!keyword) {
+        // Non-keyword inbound — no-op for now. Future inbox feature can
+        // hook in here.
+        continue;
+      }
+      // Meta's `from` is E.164 digits without the + prefix; normalisePhone
+      // tolerates either shape and returns digits only.
+      const phone = normalizePhone(m.from, "1");
+      if (!phone) continue;
+      await processOptOut(params.userId, phone, keyword, "whatsapp");
+    } catch (err) {
+      await logError("POST /api/webhook/[userId] inbound", err, {
         userId: params.userId,
       });
     }
