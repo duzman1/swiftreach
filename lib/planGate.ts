@@ -12,13 +12,15 @@ export type PaidFeature =
   | "scheduled_campaigns"
   | "contact_book"
   | "analytics"
-  | "inbox";
+  | "inbox"
+  | "google_drive";
 
 const FEATURE_COPY: Record<PaidFeature, string> = {
   scheduled_campaigns: "Scheduled & recurring campaigns",
   contact_book: "Permanent contact book",
   analytics: "Analytics dashboard",
   inbox: "Two-way messaging inbox",
+  google_drive: "Google Drive import",
 };
 
 /**

@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Cloud, Loader2, FileSpreadsheet } from "lucide-react";
+import Link from "next/link";
+import { Cloud, Loader2, FileSpreadsheet, Lock, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { ParsedFile } from "@/lib/parseFile";
@@ -96,10 +97,27 @@ export function GoogleDrivePicker({ onParsed }: Props) {
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [activeName, setActiveName] = React.useState<string>("");
   const [error, setError] = React.useState<string | null>(null);
+  const [upgradeModalOpen, setUpgradeModalOpen] = React.useState(false);
   const tokenClientRef = React.useRef<TokenClient | null>(null);
 
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY ?? "";
+
+  // Cached plan — null while loading, then "free" / "starter" / "growth".
+  // We don't block the button render on this; we check at click time.
+  const [plan, setPlan] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/billing/status")
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j.ok && typeof j.plan === "string") setPlan(j.plan);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const ensureLoaded = React.useCallback(async () => {
     await loadScriptOnce("https://apis.google.com/js/api.js");
@@ -128,6 +146,11 @@ export function GoogleDrivePicker({ onParsed }: Props) {
         }),
       });
       const data = await res.json();
+      if (res.status === 403 && data.upgradeRequired) {
+        setUpgradeModalOpen(true);
+        setPhase("idle");
+        return;
+      }
       if (!data.ok) {
         const msg: string = data.error ?? "Import failed";
         setError(msg);
@@ -177,10 +200,37 @@ export function GoogleDrivePicker({ onParsed }: Props) {
     picker.setVisible(true);
   }
 
+  async function checkPlan(): Promise<"free" | "paid"> {
+    // Use cached plan if available — saves a roundtrip. Refetch only when
+    // we have no cached value yet (component just mounted).
+    if (plan) return plan === "free" ? "free" : "paid";
+    try {
+      const r = await fetch("/api/billing/status");
+      const j = await r.json();
+      if (j.ok && typeof j.plan === "string") {
+        setPlan(j.plan);
+        return j.plan === "free" ? "free" : "paid";
+      }
+    } catch {
+      // Network error — treat as free to be safe. Server route will
+      // re-check and 403 anyway.
+      return "free";
+    }
+    return "free";
+  }
+
   async function start() {
     if (!clientId || !apiKey) {
       setError("Google credentials not configured.");
       setPhase("error");
+      return;
+    }
+    // Plan gate. Free users see the upgrade modal instead of the picker.
+    // The /api/drive/import route also rechecks server-side — this is the
+    // friendlier user-facing block.
+    const tier = await checkPlan();
+    if (tier === "free") {
+      setUpgradeModalOpen(true);
       return;
     }
     setError(null);
@@ -249,6 +299,62 @@ export function GoogleDrivePicker({ onParsed }: Props) {
       {error && phase === "error" && (
         <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2 text-left">
           {error}
+        </div>
+      )}
+
+      {upgradeModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setUpgradeModalOpen(false)}
+        >
+          <div
+            className="bg-background rounded-lg shadow-xl max-w-md w-full p-6 space-y-4 text-left"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="flex items-center gap-2">
+              <Lock className="w-5 h-5 text-emerald-700" />
+              <h3 className="text-lg font-semibold">Google Drive Import</h3>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Google Drive import is available on Starter and Growth plans.
+            </p>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
+                Upgrade to unlock
+              </div>
+              <ul className="space-y-1.5">
+                <li className="flex items-start gap-2 text-sm">
+                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  Import directly from Google Sheets
+                </li>
+                <li className="flex items-start gap-2 text-sm">
+                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  Import Excel files from Drive
+                </li>
+                <li className="flex items-start gap-2 text-sm">
+                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  Save contacts to your Contact Book
+                </li>
+              </ul>
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row gap-2 pt-2 border-t">
+              <Button
+                variant="ghost"
+                onClick={() => setUpgradeModalOpen(false)}
+                className="sm:flex-none"
+              >
+                Cancel
+              </Button>
+              <Link
+                href="/billing"
+                className="flex-1 inline-flex items-center justify-center px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 transition-colors"
+              >
+                Upgrade to Starter — $29/mo →
+              </Link>
+            </div>
+          </div>
         </div>
       )}
     </div>

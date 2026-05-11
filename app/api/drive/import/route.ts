@@ -8,6 +8,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { parseExcelBytes, parseCsvText } from "@/lib/parseFile";
+import { requireUserId } from "@/lib/auth";
+import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -78,6 +80,18 @@ async function downloadAsText(
 }
 
 export async function POST(req: NextRequest) {
+  // Plan gate — Google Drive import is Starter+. The client-side picker
+  // already pre-checks the plan, but enforce here too so a free user
+  // can't reach this route via curl/devtools.
+  let userId: string;
+  try {
+    userId = await requireUserId();
+  } catch {
+    return bad(401, "Unauthorized");
+  }
+  const gate = await requirePaidPlan(userId, "google_drive");
+  if (gate) return gate;
+
   let body: ImportBody;
   try {
     body = await req.json();
