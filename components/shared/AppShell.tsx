@@ -1,37 +1,23 @@
-"use client";
-
-// Client-side chrome decision. Lives outside the root layout so it re-runs
-// on every client navigation via usePathname() — root layout itself is
-// preserved across same-tree route changes in App Router, which means a
-// server-side branch on `headers().get("x-pathname")` gets stuck after the
-// first render. Symptom: navigating /admin → / would leave the user
-// sidebar hidden because the cached root layout still thought we were on
-// /admin.
+// User-facing chrome: green sidebar + mobile topbar + announcement banner +
+// footer. Wraps every signed-in user page.
 //
-// On admin routes: render children only (the admin layout provides its
-// own slate-900 sidebar).
-// On user routes: render the full user chrome (Navbar + announcement
-// banner + footer).
-// On signed-out routes: render children only (landing / sign-in / sign-up
-// can be full-bleed).
+// Used in two places:
+//   1. app/(app)/layout.tsx — wraps every page in the (app) route group
+//   2. app/page.tsx — the dashboard at `/` lives outside the (app) group
+//      (route groups can't share the URL with the root page), so the
+//      signed-in branch wraps its own content with this.
+//
+// This is intentionally NOT a client component and does NO pathname
+// branching. The shared-layout caching bug that bit the previous fix
+// happened because a single root layout was deciding chrome based on
+// pathname; routing now puts admin and user pages in sibling subtrees
+// with their own layouts, so admin chrome and user chrome are mutually
+// exclusive by file structure.
 
-import { usePathname } from "next/navigation";
 import { Navbar, MobileTopbar } from "./Navbar";
 import { AnnouncementBanner } from "./AnnouncementBanner";
 
-interface Props {
-  isSignedIn: boolean;
-  children: React.ReactNode;
-}
-
-export function AppShell({ isSignedIn, children }: Props) {
-  const pathname = usePathname() ?? "";
-  const isAdminRoute = pathname.startsWith("/admin");
-
-  if (!isSignedIn || isAdminRoute) {
-    return <>{children}</>;
-  }
-
+export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <Navbar />

@@ -1,9 +1,22 @@
+// Minimal root layout. Wraps html/body and provides ClerkProvider +
+// Toaster to everything. Does NOT render any chrome — chrome belongs to
+// the route group:
+//   - app/(app)/layout.tsx       → user chrome (sidebar)
+//   - app/admin/layout.tsx       → admin chrome (slate sidebar)
+//   - app/page.tsx               → wraps its own AppShell inline (signed-in)
+//                                  or renders bare LandingPage (signed-out)
+//   - app/sign-in, app/sign-up   → bare auth pages
+//
+// Putting chrome in a child layout instead of here means navigating between
+// admin and user routes guarantees one layout unmounts and another mounts.
+// Previously chrome was decided here based on pathname, which got stuck
+// across navigations because root layout never unmounts (App Router
+// preserves shared layouts).
+
 import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ClerkProvider } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
-import { AppShell } from "@/components/shared/AppShell";
 
 const APP_TITLE = "SwiftReach — WhatsApp Business marketing for small businesses";
 const APP_DESCRIPTION =
@@ -29,24 +42,16 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // Server-side auth decides whether the user can have chrome at all.
-  // The chrome-vs-admin decision itself runs client-side in <AppShell>
-  // (it uses usePathname()) — root layout is preserved across client-side
-  // navigations in App Router, so a server-side branch on the pathname
-  // gets stuck. See AppShell for the full rationale.
-  const { userId } = await auth();
-  const isSignedIn = !!userId;
-
   return (
     <ClerkProvider afterSignOutUrl="/">
       <html lang="en">
         <body className="bg-zinc-50 text-foreground antialiased">
-          <AppShell isSignedIn={isSignedIn}>{children}</AppShell>
+          {children}
           <Toaster position="top-right" richColors closeButton />
         </body>
       </html>

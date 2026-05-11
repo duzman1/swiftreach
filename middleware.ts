@@ -28,18 +28,12 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
-  // Forward the pathname so server layouts/components can branch on it
-  // (e.g. root layout needs to know not to wrap /admin routes in user chrome).
-  const url = new URL(request.url);
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-pathname", url.pathname);
-  const passThrough = NextResponse.next({ request: { headers: requestHeaders } });
-
-  if (isPublicRoute(request)) return passThrough;
+  if (isPublicRoute(request)) return;
 
   const { userId } = await auth();
-  if (userId) return passThrough; // signed in — let the route render
+  if (userId) return; // signed in — let the route render
 
+  const url = new URL(request.url);
   const pathname = url.pathname;
 
   // API requests get a JSON 401 instead of an HTML redirect.
