@@ -49,6 +49,25 @@ async function loadDashboardData(userId: string) {
 }
 
 export default async function HomePage() {
+  // TEMPORARY DEBUG: same instrumentation as the (app) layout. The
+  // dashboard page calls auth(), requireUser() (Clerk currentUser +
+  // Prisma upsert), and loadDashboardData() (Prisma counts). Any of
+  // those can fail post Clerk dev→prod switch — log and re-throw so
+  // the real error surfaces in Vercel runtime logs instead of being
+  // swallowed by the "Something went wrong" overlay.
+  try {
+    return await renderDashboard();
+  } catch (error) {
+    const digest = (error as { digest?: string })?.digest;
+    if (digest !== "NEXT_REDIRECT" && digest !== "DYNAMIC_SERVER_USAGE") {
+      // eslint-disable-next-line no-console
+      console.error("Dashboard error:", error);
+    }
+    throw error;
+  }
+}
+
+async function renderDashboard() {
   const { userId } = await auth();
 
   // Logged-out: public landing page.
