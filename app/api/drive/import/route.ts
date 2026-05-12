@@ -8,8 +8,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { parseExcelBytes, parseCsvText } from "@/lib/parseFile";
-import { requireUser } from "@/lib/auth";
-import { errorResponse } from "@/lib/apiResponse";
+import { requireUserId } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+
+// Plans that may use Google Drive import. Any other value (incl. null /
+// "free") is rejected by the gate at the top of POST().
+const PAID_PLANS = ["starter", "growth"];
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -82,17 +86,27 @@ async function downloadAsText(
 export async function POST(req: NextRequest) {
   // Plan gate — Google Drive import is Starter+. The client-side picker
   // already pre-checks the plan, but enforce here too so a free user
-  // can't reach this route via curl/devtools.
-  let user: Awaited<ReturnType<typeof requireUser>>;
+  // can't reach this route via curl/devtools. Response shape matches
+  // what the picker's importFile() handler expects on a 403:
+  //   { error, upgradeRequired, redirectTo }.
+  let userId: string;
   try {
-    user = await requireUser();
+    userId = await requireUserId();
   } catch {
     return bad(401, "Unauthorized");
   }
-  if (user.plan === "free") {
-    return errorResponse(
-      "Google Drive import requires Starter or Growth plan",
-      403
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { plan: true },
+  });
+  if (!PAID_PLANS.includes(user?.plan ?? "free")) {
+    return Response.json(
+      {
+        error: "Google Drive import requires a paid plan.",
+        upgradeRequired: true,
+        redirectTo: "/billing?feature=google-drive-import",
+      },
+      { status: 403 }
     );
   }
 

@@ -3,6 +3,7 @@
 // downgrades, payment-method updates all go through the Stripe Customer
 // Portal — opened by the "Manage Subscription" button.
 
+import { Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireUser } from "@/lib/auth";
@@ -11,6 +12,15 @@ import { PlanComparison } from "@/components/billing/PlanComparison";
 import { PortalButton } from "@/components/billing/PortalButton";
 
 export const dynamic = "force-dynamic";
+
+// Copy keyed by the `?feature=...` query param. Set when the user gets
+// redirected here by a paid-feature gate (currently only Google Drive
+// import — see components/send/GoogleDrivePicker.tsx). Add new entries
+// here when you gate more features.
+const FEATURE_MESSAGES: Record<string, string> = {
+  "google-drive-import":
+    "Upgrade to import contacts directly from Google Drive.",
+};
 
 function fmtDate(d: Date | null | undefined): string {
   if (!d) return "—";
@@ -109,9 +119,17 @@ function SubscriptionStatusLine({
   return null;
 }
 
-export default async function BillingPage() {
+export default async function BillingPage({
+  searchParams,
+}: {
+  searchParams?: { feature?: string };
+}) {
   const user = await requireUser();
   const plan = getPlan(user.plan);
+  // ?feature=… set when the user was redirected here by a paid-feature
+  // gate. Render an amber upgrade banner above the rest of the page.
+  const featureKey = searchParams?.feature ?? "";
+  const featureMessage = FEATURE_MESSAGES[featureKey] ?? null;
   const used = user.messagesUsedThisMonth;
   const limit = plan.limits.messagesPerMonth;
   const percent = limit > 0 && Number.isFinite(limit) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
@@ -144,6 +162,24 @@ export default async function BillingPage() {
           Manage your subscription, view usage, and upgrade your plan.
         </p>
       </header>
+
+      {featureMessage && (
+        <div
+          role="alert"
+          className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3"
+        >
+          <Lock className="w-5 h-5 text-amber-700 mt-0.5 shrink-0" />
+          <div className="space-y-0.5">
+            <div className="text-sm font-semibold text-amber-900">
+              Upgrade required
+            </div>
+            <div className="text-sm text-amber-900">{featureMessage}</div>
+            <div className="text-xs text-amber-800/80">
+              Choose a plan below to continue.
+            </div>
+          </div>
+        </div>
+      )}
 
       <Card>
         <CardHeader>

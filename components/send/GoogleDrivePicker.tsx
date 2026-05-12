@@ -1,11 +1,13 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { Cloud, Loader2, FileSpreadsheet, Lock, Check } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Cloud, Loader2, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { ParsedFile } from "@/lib/parseFile";
+
+const PAID_PLANS = ["starter", "growth"];
 
 // Minimal type stubs for the runtime-loaded Google globals so we don't need
 // the full @types/google.picker / @types/gapi dependency chain.
@@ -94,20 +96,20 @@ function loadScriptOnce(src: string): Promise<void> {
 }
 
 export function GoogleDrivePicker({ onParsed }: Props) {
+  const router = useRouter();
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [activeName, setActiveName] = React.useState<string>("");
   const [error, setError] = React.useState<string | null>(null);
-  const [upgradeModalOpen, setUpgradeModalOpen] = React.useState(false);
   const tokenClientRef = React.useRef<TokenClient | null>(null);
 
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY ?? "";
 
   // Plan is fetched on mount and cached in state. The button's onClick
-  // checks userPlan === 'free' BEFORE doing anything else — see start().
-  // /api/billing/status returns { ok, plan } at the top level (not nested
-  // under `data`); fall back to 'free' if the response shape is missing
-  // either field so the gate fails closed.
+  // checks PAID_PLANS BEFORE doing anything else — see start(). Same
+  // shape as the rest of the app: GET /api/billing/status returns
+  // { ok, plan } at the top level. Fall back to 'free' on any error
+  // so the gate fails closed.
   const [userPlan, setUserPlan] = React.useState<string | null>(null);
   React.useEffect(() => {
     fetch("/api/billing/status")
@@ -144,9 +146,14 @@ export function GoogleDrivePicker({ onParsed }: Props) {
       });
       const data = await res.json();
       if (res.status === 403) {
-        // Server enforces the same plan gate. If the client cache was
-        // stale (plan downgraded since mount), this catches it.
-        setUpgradeModalOpen(true);
+        // Server enforces the same plan gate (defence in depth).
+        // Stale client cache → server upgradeRequired response →
+        // redirect to billing page with feature context, matching the
+        // client-side guard.
+        const target =
+          (typeof data.redirectTo === "string" && data.redirectTo) ||
+          "/billing?feature=google-drive-import";
+        router.push(target);
         setPhase("idle");
         return;
       }
@@ -201,13 +208,12 @@ export function GoogleDrivePicker({ onParsed }: Props) {
 
   async function start() {
     // Plan gate FIRST — before touching Google credentials, the picker
-    // SDK, or anything else. Free users get the upgrade modal and the
-    // function returns. The server route /api/drive/import also rechecks
-    // (so devtools/curl can't bypass), but this is the friendlier
-    // client-side block. Treat "still loading" (userPlan === null) the
-    // same as 'free' to fail closed.
-    if (userPlan === null || userPlan === "free") {
-      setUpgradeModalOpen(true);
+    // SDK, or anything else. Free (and unknown / still-loading) users
+    // get redirected to /billing with the feature query param so the
+    // billing page can show context. The server route /api/drive/import
+    // also rechecks, so devtools / curl can't bypass.
+    if (!PAID_PLANS.includes(userPlan?.toLowerCase() ?? "free")) {
+      router.push("/billing?feature=google-drive-import");
       return;
     }
     if (!clientId || !apiKey) {
@@ -281,62 +287,6 @@ export function GoogleDrivePicker({ onParsed }: Props) {
       {error && phase === "error" && (
         <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2 text-left">
           {error}
-        </div>
-      )}
-
-      {upgradeModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setUpgradeModalOpen(false)}
-        >
-          <div
-            className="bg-background rounded-lg shadow-xl max-w-md w-full p-6 space-y-4 text-left"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="flex items-center gap-2">
-              <Lock className="w-5 h-5 text-emerald-700" />
-              <h3 className="text-lg font-semibold">Google Drive Import</h3>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Google Drive import is available on Starter and Growth plans.
-            </p>
-            <div>
-              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
-                Upgrade to unlock
-              </div>
-              <ul className="space-y-1.5">
-                <li className="flex items-start gap-2 text-sm">
-                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                  Import directly from Google Sheets
-                </li>
-                <li className="flex items-start gap-2 text-sm">
-                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                  Import Excel files from Drive
-                </li>
-                <li className="flex items-start gap-2 text-sm">
-                  <Check className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                  Save contacts to your Contact Book
-                </li>
-              </ul>
-            </div>
-            <div className="flex flex-col-reverse sm:flex-row gap-2 pt-2 border-t">
-              <Button
-                variant="ghost"
-                onClick={() => setUpgradeModalOpen(false)}
-                className="sm:flex-none"
-              >
-                Cancel
-              </Button>
-              <Link
-                href="/billing"
-                className="flex-1 inline-flex items-center justify-center px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 transition-colors"
-              >
-                Upgrade to Starter — $29/mo →
-              </Link>
-            </div>
-          </div>
         </div>
       )}
     </div>
