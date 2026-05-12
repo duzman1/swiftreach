@@ -36,7 +36,7 @@ type NavItem = {
 const SECTIONS: { items: NavItem[] }[] = [
   {
     items: [
-      { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/inbox", label: "Inbox", icon: Inbox, paidOnly: true, badge: "inbox" },
       { href: "/send", label: "New Campaign", icon: Send },
     ],

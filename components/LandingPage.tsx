@@ -105,6 +105,11 @@ export function LandingPage() {
   );
 }
 
+// Default export so `import LandingPage from "@/components/LandingPage"`
+// resolves in app/page.tsx. The named export above is kept for any
+// existing call sites.
+export default LandingPage;
+
 function Feature({
   icon,
   title,
