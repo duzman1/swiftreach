@@ -8,8 +8,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { parseExcelBytes, parseCsvText } from "@/lib/parseFile";
-import { requireUserId } from "@/lib/auth";
-import { requirePaidPlan } from "@/lib/planGate";
+import { requireUser } from "@/lib/auth";
+import { errorResponse } from "@/lib/apiResponse";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -83,14 +83,18 @@ export async function POST(req: NextRequest) {
   // Plan gate — Google Drive import is Starter+. The client-side picker
   // already pre-checks the plan, but enforce here too so a free user
   // can't reach this route via curl/devtools.
-  let userId: string;
+  let user: Awaited<ReturnType<typeof requireUser>>;
   try {
-    userId = await requireUserId();
+    user = await requireUser();
   } catch {
     return bad(401, "Unauthorized");
   }
-  const gate = await requirePaidPlan(userId, "google_drive");
-  if (gate) return gate;
+  if (user.plan === "free") {
+    return errorResponse(
+      "Google Drive import requires Starter or Growth plan",
+      403
+    );
+  }
 
   let body: ImportBody;
   try {

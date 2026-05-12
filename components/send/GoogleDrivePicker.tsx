@@ -103,20 +103,17 @@ export function GoogleDrivePicker({ onParsed }: Props) {
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY ?? "";
 
-  // Cached plan — null while loading, then "free" / "starter" / "growth".
-  // We don't block the button render on this; we check at click time.
-  const [plan, setPlan] = React.useState<string | null>(null);
+  // Plan is fetched on mount and cached in state. The button's onClick
+  // checks userPlan === 'free' BEFORE doing anything else — see start().
+  // /api/billing/status returns { ok, plan } at the top level (not nested
+  // under `data`); fall back to 'free' if the response shape is missing
+  // either field so the gate fails closed.
+  const [userPlan, setUserPlan] = React.useState<string | null>(null);
   React.useEffect(() => {
-    let cancelled = false;
     fetch("/api/billing/status")
       .then((r) => r.json())
-      .then((j) => {
-        if (!cancelled && j.ok && typeof j.plan === "string") setPlan(j.plan);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
+      .then((d) => setUserPlan(d?.plan || "free"))
+      .catch(() => setUserPlan("free"));
   }, []);
 
   const ensureLoaded = React.useCallback(async () => {
@@ -146,7 +143,9 @@ export function GoogleDrivePicker({ onParsed }: Props) {
         }),
       });
       const data = await res.json();
-      if (res.status === 403 && data.upgradeRequired) {
+      if (res.status === 403) {
+        // Server enforces the same plan gate. If the client cache was
+        // stale (plan downgraded since mount), this catches it.
         setUpgradeModalOpen(true);
         setPhase("idle");
         return;
@@ -200,37 +199,20 @@ export function GoogleDrivePicker({ onParsed }: Props) {
     picker.setVisible(true);
   }
 
-  async function checkPlan(): Promise<"free" | "paid"> {
-    // Use cached plan if available — saves a roundtrip. Refetch only when
-    // we have no cached value yet (component just mounted).
-    if (plan) return plan === "free" ? "free" : "paid";
-    try {
-      const r = await fetch("/api/billing/status");
-      const j = await r.json();
-      if (j.ok && typeof j.plan === "string") {
-        setPlan(j.plan);
-        return j.plan === "free" ? "free" : "paid";
-      }
-    } catch {
-      // Network error — treat as free to be safe. Server route will
-      // re-check and 403 anyway.
-      return "free";
-    }
-    return "free";
-  }
-
   async function start() {
+    // Plan gate FIRST — before touching Google credentials, the picker
+    // SDK, or anything else. Free users get the upgrade modal and the
+    // function returns. The server route /api/drive/import also rechecks
+    // (so devtools/curl can't bypass), but this is the friendlier
+    // client-side block. Treat "still loading" (userPlan === null) the
+    // same as 'free' to fail closed.
+    if (userPlan === null || userPlan === "free") {
+      setUpgradeModalOpen(true);
+      return;
+    }
     if (!clientId || !apiKey) {
       setError("Google credentials not configured.");
       setPhase("error");
-      return;
-    }
-    // Plan gate. Free users see the upgrade modal instead of the picker.
-    // The /api/drive/import route also rechecks server-side — this is the
-    // friendlier user-facing block.
-    const tier = await checkPlan();
-    if (tier === "free") {
-      setUpgradeModalOpen(true);
       return;
     }
     setError(null);
