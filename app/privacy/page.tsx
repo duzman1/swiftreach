@@ -22,6 +22,11 @@ const sections: Section[] = [
   { id: "info-we-collect", number: 1, title: "Information We Collect" },
   { id: "how-we-use", number: 2, title: "How We Use Your Information" },
   { id: "google-api", number: 3, title: "Google API Services and User Data" },
+  {
+    id: "meta-whatsapp",
+    number: "3b",
+    title: "Meta WhatsApp Business API and User Data",
+  },
   { id: "sharing", number: 4, title: "Information Sharing and Disclosure" },
   { id: "retention", number: 5, title: "Data Retention" },
   { id: "security", number: 6, title: "Data Security" },
@@ -182,6 +187,109 @@ export default function PrivacyPage() {
           >
             myaccount.google.com/permissions
           </a>
+        </p>
+      </LegalSection>
+
+      <LegalSection
+        id="meta-whatsapp"
+        number="3b"
+        title="Meta WhatsApp Business API and User Data"
+      >
+        <p>
+          SwiftReach uses the Meta WhatsApp Business Cloud API to send messages
+          on behalf of our users. This section explains how we handle
+          WhatsApp-related data in compliance with Meta&apos;s Platform Terms.
+        </p>
+
+        <div>
+          <p>
+            <strong>What WhatsApp data we access and store:</strong>
+          </p>
+          <ul className="list-disc pl-6 space-y-2 mt-2">
+            <li>
+              Phone numbers of message recipients (stored as part of your
+              contact lists and campaign records).
+            </li>
+            <li>
+              Message content you compose and send through our platform
+              (stored for campaign history and analytics).
+            </li>
+            <li>
+              Message delivery statuses (sent, delivered, read, failed)
+              received via Meta&apos;s webhook callbacks.
+            </li>
+            <li>
+              Inbound message text from contacts who reply to your campaigns
+              (stored in your inbox).
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <p>
+            <strong>How we use this data:</strong>
+          </p>
+          <ul className="list-disc pl-6 space-y-2 mt-2">
+            <li>To send WhatsApp messages on your behalf.</li>
+            <li>
+              To display delivery and read receipts in your campaign reports.
+            </li>
+            <li>To power analytics and performance tracking.</li>
+            <li>
+              We do not use WhatsApp message data for advertising or share it
+              with third parties beyond what is necessary to provide the
+              Service.
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <p>
+            <strong>Data retention:</strong>
+          </p>
+          <ul className="list-disc pl-6 space-y-2 mt-2">
+            <li>
+              Contact phone numbers and campaign data are retained while your
+              account is active and deleted within 90 days of account closure.
+            </li>
+            <li>
+              Message delivery status data follows the same retention schedule.
+            </li>
+            <li>
+              Inbound messages are retained until you delete them or close your
+              account.
+            </li>
+          </ul>
+        </div>
+
+        <p>
+          <strong>Meta Platform Terms compliance:</strong> Our use of the
+          WhatsApp Business API and all data obtained through it complies with{" "}
+          <a
+            href="https://www.facebook.com/terms/platformterms"
+            target="_blank"
+            rel="noreferrer"
+            className="text-whatsapp hover:underline"
+          >
+            Meta&apos;s Platform Terms
+          </a>{" "}
+          and WhatsApp Business Policy. We do not use Meta platform data in
+          ways that violate these terms.
+        </p>
+
+        <p>
+          <strong>Data deletion:</strong> You can delete your contact data,
+          campaign history, and all associated WhatsApp message data at any
+          time by deleting your SwiftReach account. To request data deletion,
+          email{" "}
+          <a
+            href="mailto:privacy@swiftreach.app"
+            className="text-whatsapp hover:underline"
+          >
+            privacy@swiftreach.app
+          </a>{" "}
+          or delete your account through Settings. We will process deletion
+          requests within 30 days.
         </p>
       </LegalSection>
 

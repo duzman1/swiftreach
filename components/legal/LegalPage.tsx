@@ -11,7 +11,10 @@ import { MessageCircle } from "lucide-react";
 
 export interface Section {
   id: string;
-  number: number;
+  // Number can be a literal number (1, 2, 3…) or a string like "3b" when a
+  // sub-section is inserted mid-document without renumbering everything
+  // below it.
+  number: number | string;
   title: string;
 }
 
@@ -135,7 +138,7 @@ export function LegalSection({
   children,
 }: {
   id: string;
-  number: number;
+  number: number | string;
   title: string;
   children: React.ReactNode;
 }) {

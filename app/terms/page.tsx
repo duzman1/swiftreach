@@ -139,6 +139,40 @@ export default function TermsPage() {
           being restricted or banned. SwiftReach is not responsible for actions
           taken by Meta against your WhatsApp Business account.
         </p>
+
+        <div>
+          <p className="font-medium text-zinc-900">
+            Meta Data Use Restrictions:
+          </p>
+          <p>
+            You agree not to use data obtained through the WhatsApp Business
+            API to:
+          </p>
+          <ul className="list-disc pl-6 space-y-2 mt-2">
+            <li>
+              Contact people outside of WhatsApp using data obtained from
+              WhatsApp.
+            </li>
+            <li>Build advertising profiles or targeting lists.</li>
+            <li>Sell or transfer WhatsApp user data to any third party.</li>
+            <li>
+              Store message content beyond what is necessary for your
+              legitimate business operations.
+            </li>
+          </ul>
+          <p className="mt-3">
+            These restrictions are required by Meta&apos;s{" "}
+            <a
+              href="https://www.facebook.com/terms/platformterms"
+              target="_blank"
+              rel="noreferrer"
+              className="text-whatsapp hover:underline"
+            >
+              Platform Terms
+            </a>{" "}
+            and violation may result in immediate account termination.
+          </p>
+        </div>
       </LegalSection>
 
       <LegalSection id="google-drive" number={6} title="Google Drive Integration">
