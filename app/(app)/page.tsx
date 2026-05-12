@@ -13,7 +13,6 @@ import { getPlan } from "@/lib/stripe";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { LandingPage } from "@/components/LandingPage";
 import { UsageMeter } from "@/components/billing/UsageMeter";
-import { AppShell } from "@/components/shared/AppShell";
 
 export const dynamic = "force-dynamic";
 
@@ -73,11 +72,7 @@ export default async function HomePage() {
   );
   const plan = getPlan(user.plan);
 
-  // The dashboard at `/` lives outside the (app) route group (route groups
-  // can't share a URL with the root page), so we wrap its own chrome here.
-  // (app)/* routes get chrome from app/(app)/layout.tsx instead.
   return (
-    <AppShell>
     <div className="space-y-8 max-w-7xl">
       <ConnectionBanner show={!whatsappConnected} />
 
@@ -170,7 +165,6 @@ export default async function HomePage() {
         </div>
       </div>
     </div>
-    </AppShell>
   );
 }
 
