@@ -269,9 +269,13 @@ export function GoogleDrivePicker({ onParsed }: Props) {
         type="button"
         variant="outline"
         onClick={() => {
-          setError(null);
-          if (phase === "error") setPhase("idle");
-          void start();
+          // TEMPORARY DEBUG — bypasses start() entirely. If clicking this
+          // button still opens the Google Picker, the click is being
+          // intercepted somewhere ELSE (different component, parent
+          // overlay, or browser running a stale bundle). Revert once the
+          // wiring is confirmed.
+          console.log("DRIVE BUTTON CLICKED");
+          window.location.href = "/billing?feature=google-drive-import";
         }}
         disabled={busy}
         className="gap-2"
