@@ -83,8 +83,19 @@ export function LandingPage() {
         </div>
       </section>
 
-      <footer className="px-6 md:px-10 py-4 text-xs text-muted-foreground border-t bg-background text-center">
-        SwiftReach · swiftreach.app
+      <footer className="px-6 md:px-10 py-4 text-xs text-muted-foreground border-t bg-background">
+        <div className="max-w-6xl mx-auto w-full flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div>SwiftReach · swiftreach.app</div>
+          <nav className="flex items-center gap-3">
+            <Link href="/privacy" className="hover:text-foreground transition-colors">
+              Privacy Policy
+            </Link>
+            <span className="text-zinc-300">·</span>
+            <Link href="/terms" className="hover:text-foreground transition-colors">
+              Terms of Service
+            </Link>
+          </nav>
+        </div>
       </footer>
     </div>
   );

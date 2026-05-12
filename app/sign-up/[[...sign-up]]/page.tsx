@@ -19,6 +19,17 @@ export default function SignUpPage() {
           Create your free account
         </p>
         <SignUp />
+        <p className="mt-6 text-xs text-muted-foreground text-center max-w-sm">
+          By signing up, you agree to our{" "}
+          <Link href="/terms" className="text-whatsapp hover:underline">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="/privacy" className="text-whatsapp hover:underline">
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </div>
     </div>
   );

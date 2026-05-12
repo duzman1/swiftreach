@@ -21,6 +21,8 @@ const isPublicRoute = createRouteMatcher([
   "/",                          // Landing for logged-out, dashboard for logged-in
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/terms",                     // Public legal page — Google OAuth requires it
+  "/privacy",                   // Public legal page — Google OAuth requires it
   "/api/webhook(.*)",           // Meta WhatsApp webhook (incl. /api/webhook/[userId])
   "/api/clerk-webhook",         // Clerk user lifecycle webhook
   "/api/billing/webhook",       // Stripe billing webhook

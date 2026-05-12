@@ -14,6 +14,7 @@
 // with their own layouts, so admin chrome and user chrome are mutually
 // exclusive by file structure.
 
+import Link from "next/link";
 import { Navbar, MobileTopbar } from "./Navbar";
 import { AnnouncementBanner } from "./AnnouncementBanner";
 
@@ -28,7 +29,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <footer className="px-6 md:px-10 py-4 text-xs text-muted-foreground border-t bg-background">
-          SwiftReach · swiftreach.app
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div>SwiftReach · swiftreach.app</div>
+            <nav className="flex items-center gap-3">
+              <Link href="/privacy" className="hover:text-foreground transition-colors">
+                Privacy
+              </Link>
+              <span className="text-zinc-300">·</span>
+              <Link href="/terms" className="hover:text-foreground transition-colors">
+                Terms
+              </Link>
+            </nav>
+          </div>
         </footer>
       </div>
     </div>
