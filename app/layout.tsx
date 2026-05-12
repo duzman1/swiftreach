@@ -9,6 +9,13 @@ export const metadata = {
     icon: "/logo.png",
     apple: "/logo.png",
   },
+  // Google Search Console domain verification. The token below is rendered
+  // by Next as <meta name="google-site-verification" content="..." /> in
+  // the <head> of every page. Google's verifier fetches the root and
+  // checks for this exact tag.
+  verification: {
+    google: "CkaPjHZzCp_GK2n14jMFodu7Ame-2TaftLuY4O8t1u4",
+  },
 };
 
 export default function RootLayout({
