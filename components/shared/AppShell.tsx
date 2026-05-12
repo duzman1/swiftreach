@@ -19,7 +19,7 @@ import { AnnouncementBanner } from "./AnnouncementBanner";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="flex min-h-screen">
       <Navbar />
       <div className="flex flex-col flex-1 min-w-0">
         <MobileTopbar />

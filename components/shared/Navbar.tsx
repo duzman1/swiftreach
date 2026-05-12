@@ -121,7 +121,7 @@ export function Navbar() {
   const inboxCount = useInboxUnread(paid);
 
   return (
-    <aside className="hidden md:flex w-64 shrink-0 flex-col bg-zinc-900 text-zinc-100 min-h-screen p-4">
+    <aside className="flex w-64 shrink-0 flex-col bg-zinc-900 text-zinc-100 min-h-screen p-4">
       <div className="flex items-center gap-2 px-2 py-4 mb-4">
         <div className="bg-whatsapp rounded-lg p-2">
           <MessageCircle className="w-5 h-5 text-white" />

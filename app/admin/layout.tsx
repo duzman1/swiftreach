@@ -7,6 +7,7 @@
 //
 // Non-admins land here with a 403 page rather than seeing any admin chrome.
 
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { isAdminEmail } from "@/lib/adminAuth";
@@ -37,12 +38,12 @@ export default async function AdminLayout({
             Your account ({email ?? "unknown"}) is not on the admin allowlist.
             If you believe this is a mistake, contact the site owner.
           </p>
-          <a
+          <Link
             href="/"
             className="inline-block px-4 py-2 bg-slate-900 text-white text-sm rounded-md hover:bg-slate-800 transition-colors"
           >
-            Back to app
-          </a>
+            ← Back to App
+          </Link>
         </div>
       </div>
     );
