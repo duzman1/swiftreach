@@ -5,6 +5,10 @@ import "./globals.css";
 export const metadata = {
   title: "SwiftReach",
   description: "Send personalized WhatsApp messages at scale.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

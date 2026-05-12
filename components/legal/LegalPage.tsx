@@ -6,8 +6,8 @@
 // once Next sees them. We intentionally don't pull in any auth wrappers
 // here; middleware.ts whitelists /terms and /privacy as public routes.
 
+import Image from "next/image";
 import Link from "next/link";
-import { MessageCircle } from "lucide-react";
 
 export interface Section {
   id: string;
@@ -38,11 +38,19 @@ export function LegalPage({
       {/* Header — same brand mark as the landing page */}
       <header className="px-6 md:px-10 py-5 border-b border-zinc-200 bg-white">
         <div className="max-w-6xl mx-auto w-full flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <div className="bg-whatsapp rounded-lg p-2">
-              <MessageCircle className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold tracking-tight">SwiftReach</span>
+          <Link
+            href="/"
+            className="flex items-center hover:opacity-80 transition-opacity"
+            aria-label="SwiftReach home"
+          >
+            <Image
+              src="/logo.png"
+              alt="SwiftReach"
+              width={140}
+              height={40}
+              className="object-contain"
+              priority
+            />
           </Link>
           <nav className="flex items-center gap-2 text-sm">
             <Link

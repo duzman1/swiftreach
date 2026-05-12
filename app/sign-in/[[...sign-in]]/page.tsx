@@ -1,6 +1,6 @@
+import Image from "next/image";
 import Link from "next/link";
 import { SignIn } from "@clerk/nextjs";
-import { MessageCircle } from "lucide-react";
 
 export default function SignInPage() {
   return (
@@ -8,12 +8,17 @@ export default function SignInPage() {
       <div className="w-full max-w-md flex flex-col items-center">
         <Link
           href="/"
-          className="flex items-center gap-2 mb-6 text-zinc-700 hover:text-foreground"
+          className="flex items-center mb-6 hover:opacity-80 transition-opacity"
+          aria-label="SwiftReach home"
         >
-          <div className="bg-whatsapp rounded-lg p-2">
-            <MessageCircle className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-2xl font-bold tracking-tight">SwiftReach</span>
+          <Image
+            src="/logo.png"
+            alt="SwiftReach"
+            width={180}
+            height={50}
+            className="object-contain"
+            priority
+          />
         </Link>
         <p className="text-sm text-muted-foreground mb-6">
           Sign in to your account

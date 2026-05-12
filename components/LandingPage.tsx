@@ -1,6 +1,6 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
-  MessageCircle,
   FileSpreadsheet,
   Variable,
   LineChart,
@@ -11,12 +11,16 @@ export function LandingPage() {
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50">
       <header className="px-6 md:px-10 py-5 flex items-center justify-between max-w-6xl mx-auto w-full">
-        <div className="flex items-center gap-2">
-          <div className="bg-whatsapp rounded-lg p-2">
-            <MessageCircle className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-xl font-bold tracking-tight">SwiftReach</span>
-        </div>
+        <Link href="/" className="flex items-center" aria-label="SwiftReach home">
+          <Image
+            src="/logo.png"
+            alt="SwiftReach"
+            width={140}
+            height={40}
+            className="object-contain"
+            priority
+          />
+        </Link>
         <Link href="/sign-in">
           <Button variant="ghost" size="sm">
             Sign In

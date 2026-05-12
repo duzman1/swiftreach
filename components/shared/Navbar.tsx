@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -13,7 +14,6 @@ import {
   BarChart3,
   FileText,
   Settings,
-  MessageCircle,
   CreditCard,
   Lock,
 } from "lucide-react";
@@ -122,13 +122,15 @@ export function Navbar() {
 
   return (
     <aside className="flex w-64 shrink-0 flex-col bg-zinc-900 text-zinc-100 min-h-screen p-4">
-      <div className="flex items-center gap-2 px-2 py-4 mb-4">
-        <div className="bg-whatsapp rounded-lg p-2">
-          <MessageCircle className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <div className="font-semibold leading-tight">SwiftReach</div>
-        </div>
+      <div className="flex items-center px-2 py-4 mb-4">
+        <Image
+          src="/logo.png"
+          alt="SwiftReach"
+          width={140}
+          height={40}
+          className="object-contain"
+          priority
+        />
       </div>
 
       <nav className="flex flex-col gap-1 flex-1">
@@ -215,11 +217,14 @@ function NavLink({
 
 export function MobileTopbar() {
   return (
-    <div className="md:hidden flex items-center gap-2 bg-zinc-900 text-zinc-100 p-3">
-      <div className="bg-whatsapp rounded-md p-1.5">
-        <MessageCircle className="w-4 h-4 text-white" />
-      </div>
-      <span className="font-semibold">SwiftReach</span>
+    <div className="md:hidden flex items-center bg-zinc-900 text-zinc-100 p-3">
+      <Image
+        src="/logo.png"
+        alt="SwiftReach"
+        width={120}
+        height={34}
+        className="object-contain"
+      />
     </div>
   );
 }
