@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Rounded-square background; rx=96 (~18.75%) matches iOS app-icon style
+       and reads as "SwiftReach brand mark" alongside our in-app green tile. -->
+  <rect width="512" height="512" rx="96" ry="96" fill="#25D366"/>
+  <!-- Lightning bolt: stylises "Swift" without depending on font availability. -->
+  <path d="M 320 64 L 144 280 L 232 280 L 192 448 L 368 232 L 280 232 Z" fill="#ffffff"/>
+</svg>
