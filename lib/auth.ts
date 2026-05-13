@@ -24,11 +24,26 @@ export async function requireUserId(): Promise<string> {
 /**
  * Return the authenticated user's full DB row (creating it if missing).
  *
- * Why the create-on-first-access fallback: in normal operation the Clerk
- * user.created webhook (POST /api/clerk-webhook) inserts the row before the
- * user can hit any other route. But webhooks can be late, retried, or — in
- * dev — not configured at all. Rather than 500ing on a foreign-key violation
- * the first time a user touches the API, materialize the row on demand.
+ * Three-path safety net:
+ *   1. Row exists at the current Clerk userId — return it (hot path).
+ *   2. Row exists under the same EMAIL but a different Clerk userId —
+ *      migrate it. This happens when the Clerk instance flips from
+ *      development to production: same human, but Clerk issues a brand
+ *      new userId. Naive `prisma.user.create()` would crash on the email
+ *      unique constraint (P2002).
+ *   3. No row at all — create one fresh.
+ *
+ * Case 2 needs a transaction: changing User.id while FKs in Campaign,
+ * MessageTemplate, ScheduledCampaign, SavedContact, ContactGroup,
+ * InboundMessage and OutboundReply still reference the old value will
+ * fail at commit (Postgres FK has ON UPDATE NO ACTION by default,
+ * which Prisma doesn't override). Update every child relation first,
+ * then update the User's primary key — all atomically.
+ *
+ * Race: two concurrent requests on the first login after the switch can
+ * both enter the migration branch; one wins, the other will find the
+ * row by id on retry. We don't lock the row explicitly — the worst case
+ * is a single 500 that the user retries through.
  */
 export async function requireUser() {
   const userId = await requireUserId();
@@ -37,13 +52,38 @@ export async function requireUser() {
   if (existing) return existing;
 
   const clerkUser = await currentUser();
+  const email = clerkUser?.emailAddresses?.[0]?.emailAddress ?? "";
+  const firstName = clerkUser?.firstName ?? null;
+  const lastName = clerkUser?.lastName ?? null;
+
+  // Case 2: email already exists under a different Clerk userId.
+  const existingByEmail = email
+    ? await prisma.user.findUnique({ where: { email } })
+    : null;
+
+  if (existingByEmail && existingByEmail.id !== userId) {
+    return prisma.$transaction(async (tx) => {
+      const oldId = existingByEmail.id;
+      // Re-point every child relation. updateMany is a no-op when the
+      // user has none of a given kind — safe to call all.
+      await tx.campaign.updateMany({ where: { userId: oldId }, data: { userId } });
+      await tx.messageTemplate.updateMany({ where: { userId: oldId }, data: { userId } });
+      await tx.scheduledCampaign.updateMany({ where: { userId: oldId }, data: { userId } });
+      await tx.savedContact.updateMany({ where: { userId: oldId }, data: { userId } });
+      await tx.contactGroup.updateMany({ where: { userId: oldId }, data: { userId } });
+      await tx.inboundMessage.updateMany({ where: { userId: oldId }, data: { userId } });
+      await tx.outboundReply.updateMany({ where: { userId: oldId }, data: { userId } });
+      // Now safe to flip the User's primary key.
+      return tx.user.update({
+        where: { id: oldId },
+        data: { id: userId, firstName, lastName },
+      });
+    });
+  }
+
+  // Case 3: fresh user, no collision.
   return prisma.user.create({
-    data: {
-      id: userId,
-      email: clerkUser?.emailAddresses?.[0]?.emailAddress ?? "",
-      firstName: clerkUser?.firstName ?? null,
-      lastName: clerkUser?.lastName ?? null,
-    },
+    data: { id: userId, email, firstName, lastName },
   });
 }
 
