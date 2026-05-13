@@ -65,6 +65,10 @@ export async function POST(req: NextRequest) {
         email: user.email,
         name: [user.firstName, user.lastName].filter(Boolean).join(" ") || undefined,
         metadata: { userId: user.id },
+        // Surfaces in the Stripe dashboard customer list so the team can
+        // tell SwiftReach customers apart from any other Stripe accounts
+        // sharing the workspace.
+        description: "SwiftReach subscriber",
       });
       customerId = customer.id;
       await prisma.user.update({
@@ -87,6 +91,23 @@ export async function POST(req: NextRequest) {
         metadata: { userId: user.id, plan: planId },
       },
       allow_promotion_codes: true,
+      // Reassurance copy under the "Subscribe" button. Stripe renders
+      // this verbatim — keep it short and matter-of-fact.
+      custom_text: {
+        submit: {
+          message:
+            "Your subscription will be billed monthly. Cancel anytime.",
+        },
+      },
+      // Tell Stripe to save the card for off-session reuse (renewals).
+      // Without this, recurring charges can fall back to fresh
+      // authentication on each cycle — annoying for the customer and a
+      // common cause of involuntary churn.
+      payment_method_options: {
+        card: {
+          setup_future_usage: "off_session",
+        },
+      },
     });
 
     if (!session.url) {
