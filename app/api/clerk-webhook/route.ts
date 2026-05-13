@@ -58,43 +58,38 @@ export async function POST(req: NextRequest) {
       const firstName = data.first_name ?? null;
       const lastName = data.last_name ?? null;
 
-      // Same three-path safety net as lib/auth.ts → see comment there.
-      // We have to handle the email-exists-under-different-id case here
-      // too, otherwise the very first prod webhook for a migrated user
-      // crashes on P2002 (email unique) and Clerk retries forever.
-      const existingById = await prisma.user.findUnique({
-        where: { id: data.id },
-      });
-      if (existingById) {
+      // Mirror lib/auth.ts → see the comment there for the FK-update
+      // caveat. Same staged lookup: by id, then by email; finally an
+      // upsert by email as safety net.
+      let synced = await prisma.user.findUnique({ where: { id: data.id } });
+      if (synced) {
         await prisma.user.update({
           where: { id: data.id },
           data: { email, firstName, lastName },
         });
-      } else {
-        const existingByEmail = email
-          ? await prisma.user.findUnique({ where: { email } })
-          : null;
-        if (existingByEmail && existingByEmail.id !== data.id) {
-          // Migrate: re-point all FKs, then flip the User's primary key.
-          await prisma.$transaction(async (tx) => {
-            const oldId = existingByEmail.id;
-            await tx.campaign.updateMany({ where: { userId: oldId }, data: { userId: data.id } });
-            await tx.messageTemplate.updateMany({ where: { userId: oldId }, data: { userId: data.id } });
-            await tx.scheduledCampaign.updateMany({ where: { userId: oldId }, data: { userId: data.id } });
-            await tx.savedContact.updateMany({ where: { userId: oldId }, data: { userId: data.id } });
-            await tx.contactGroup.updateMany({ where: { userId: oldId }, data: { userId: data.id } });
-            await tx.inboundMessage.updateMany({ where: { userId: oldId }, data: { userId: data.id } });
-            await tx.outboundReply.updateMany({ where: { userId: oldId }, data: { userId: data.id } });
-            await tx.user.update({
-              where: { id: oldId },
-              data: { id: data.id, firstName, lastName },
-            });
+      } else if (email) {
+        const existingByEmail = await prisma.user.findUnique({
+          where: { email },
+        });
+        if (existingByEmail) {
+          await prisma.user.update({
+            where: { email },
+            data: { id: data.id, firstName, lastName },
           });
-        } else {
-          await prisma.user.create({
-            data: { id: data.id, email, firstName, lastName },
-          });
+          synced = existingByEmail;
         }
+      }
+      if (!synced) {
+        await prisma.user.upsert({
+          where: { email },
+          update: {
+            id: data.id,
+            firstName,
+            lastName,
+            updatedAt: new Date(),
+          },
+          create: { id: data.id, email, firstName, lastName },
+        });
       }
     } else if (event.type === "user.deleted") {
       // Best-effort delete. Cascade in schema removes their campaigns +

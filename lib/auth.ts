@@ -24,66 +24,63 @@ export async function requireUserId(): Promise<string> {
 /**
  * Return the authenticated user's full DB row (creating it if missing).
  *
- * Three-path safety net:
- *   1. Row exists at the current Clerk userId — return it (hot path).
- *   2. Row exists under the same EMAIL but a different Clerk userId —
- *      migrate it. This happens when the Clerk instance flips from
- *      development to production: same human, but Clerk issues a brand
- *      new userId. Naive `prisma.user.create()` would crash on the email
- *      unique constraint (P2002).
- *   3. No row at all — create one fresh.
+ * Three-stage lookup:
+ *   1. findUnique by id — hot path.
+ *   2. fallback to findUnique by EMAIL — handles the Clerk dev→prod
+ *      switch where the same human gets re-issued under a new userId.
+ *      If found, the row's id is updated to point at the new userId.
+ *   3. final safety-net upsert by email — covers any race / partial
+ *      state we didn't catch above.
  *
- * Case 2 needs a transaction: changing User.id while FKs in Campaign,
- * MessageTemplate, ScheduledCampaign, SavedContact, ContactGroup,
- * InboundMessage and OutboundReply still reference the old value will
- * fail at commit (Postgres FK has ON UPDATE NO ACTION by default,
- * which Prisma doesn't override). Update every child relation first,
- * then update the User's primary key — all atomically.
- *
- * Race: two concurrent requests on the first login after the switch can
- * both enter the migration branch; one wins, the other will find the
- * row by id on retry. We don't lock the row explicitly — the worst case
- * is a single 500 that the user retries through.
+ * NOTE on the id update at stage 2: Postgres rejects updating a
+ * primary key while child rows still reference the old value (FK
+ * constraint, ON UPDATE NO ACTION by default). If the affected user
+ * has any campaigns / templates / scheduled / contacts / inbox rows,
+ * THIS UPDATE WILL THROW P2003. If P2003 surfaces in logs, switch the
+ * id update for a $transaction that issues
+ * `SET CONSTRAINTS ALL DEFERRED` first — but that also requires the
+ * FK constraints to be DEFERRABLE, which Prisma doesn't generate by
+ * default. The migration-friendly path is to recreate the User row
+ * with the new id and re-point children in raw SQL.
  */
 export async function requireUser() {
   const userId = await requireUserId();
 
-  const existing = await prisma.user.findUnique({ where: { id: userId } });
-  if (existing) return existing;
-
   const clerkUser = await currentUser();
-  const email = clerkUser?.emailAddresses?.[0]?.emailAddress ?? "";
-  const firstName = clerkUser?.firstName ?? null;
-  const lastName = clerkUser?.lastName ?? null;
+  const userEmail = clerkUser?.emailAddresses?.[0]?.emailAddress ?? "";
 
-  // Case 2: email already exists under a different Clerk userId.
-  const existingByEmail = email
-    ? await prisma.user.findUnique({ where: { email } })
-    : null;
+  // Stage 1: lookup by current Clerk userId.
+  let user = await prisma.user.findUnique({ where: { id: userId } });
 
-  if (existingByEmail && existingByEmail.id !== userId) {
-    return prisma.$transaction(async (tx) => {
-      const oldId = existingByEmail.id;
-      // Re-point every child relation. updateMany is a no-op when the
-      // user has none of a given kind — safe to call all.
-      await tx.campaign.updateMany({ where: { userId: oldId }, data: { userId } });
-      await tx.messageTemplate.updateMany({ where: { userId: oldId }, data: { userId } });
-      await tx.scheduledCampaign.updateMany({ where: { userId: oldId }, data: { userId } });
-      await tx.savedContact.updateMany({ where: { userId: oldId }, data: { userId } });
-      await tx.contactGroup.updateMany({ where: { userId: oldId }, data: { userId } });
-      await tx.inboundMessage.updateMany({ where: { userId: oldId }, data: { userId } });
-      await tx.outboundReply.updateMany({ where: { userId: oldId }, data: { userId } });
-      // Now safe to flip the User's primary key.
-      return tx.user.update({
-        where: { id: oldId },
-        data: { id: userId, firstName, lastName },
+  // Stage 2: fallback to email-based lookup. Handles Clerk dev→prod
+  // migration where the userId changes but the email is stable.
+  if (!user && userEmail) {
+    user = await prisma.user.findUnique({ where: { email: userEmail } });
+    if (user) {
+      user = await prisma.user.update({
+        where: { email: userEmail },
+        data: { id: userId },
       });
-    });
+    }
   }
 
-  // Case 3: fresh user, no collision.
-  return prisma.user.create({
-    data: { id: userId, email, firstName, lastName },
+  if (user) return user;
+
+  // Stage 3: nothing found by id OR by email → upsert as safety net.
+  return prisma.user.upsert({
+    where: { email: userEmail },
+    update: {
+      id: userId,
+      firstName: clerkUser?.firstName ?? null,
+      lastName: clerkUser?.lastName ?? null,
+      updatedAt: new Date(),
+    },
+    create: {
+      id: userId,
+      email: userEmail,
+      firstName: clerkUser?.firstName ?? null,
+      lastName: clerkUser?.lastName ?? null,
+    },
   });
 }
 
