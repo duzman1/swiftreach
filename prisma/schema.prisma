@@ -34,7 +34,21 @@ model User {
   // and /onboarding to know whether to send the user through setup. Acts as
   // a belt-and-suspenders against Clerk's NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL
   // not being configured in every environment.
+  //
+  // Set BOTH onboardingCompletedAt AND wizardCompletedAt when the new
+  // Phase 7 wizard reaches its final step — keeps the legacy dashboard
+  // redirect logic happy.
   onboardingCompletedAt DateTime?
+
+  // Phase 7 guided setup wizard progress. wizardStep stores the highest
+  // step the user has reached (never advances backwards in the DB even if
+  // the user clicks Back in the UI), so if they close the browser they
+  // resume where they left off. setupRequestedAt is set when the user
+  // clicks "Get Help Setting Up" — surfaces in /admin so we can act on it.
+  wizardStep        Int       @default(1)
+  wizardStartedAt   DateTime?
+  wizardCompletedAt DateTime?
+  setupRequestedAt  DateTime?
 
   // ── Billing (Phase 4) ─────────────────────────────────────────────────
   // Plan id matches keys in lib/stripe.ts PLANS — the single source of truth

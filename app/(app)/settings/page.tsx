@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { AlertTriangle, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DefaultsForm } from "@/components/settings/DefaultsForm";
 import { WhatsAppCredentialsForm } from "@/components/settings/WhatsAppCredentialsForm";
@@ -6,10 +9,17 @@ import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
+const TOTAL_STEPS = 7;
+
 export default async function SettingsPage() {
   // Authenticated user — used to construct the per-user webhook URL.
   const user = await requireUser();
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+
+  const wizardComplete = Boolean(user.wizardCompletedAt);
+  // wizardStep counts from 1; "X/7 complete" treats the highest reached
+  // step as the number of completed steps. Cap at 7 for display.
+  const completedSteps = Math.min(user.wizardStep ?? 0, TOTAL_STEPS);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -20,6 +30,30 @@ export default async function SettingsPage() {
           webhook settings. Credentials are stored encrypted in your account.
         </p>
       </header>
+
+      {!wizardComplete && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-700 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-amber-900">
+              Setup incomplete
+            </div>
+            <div className="text-xs text-amber-800/80 mt-0.5">
+              Complete the setup wizard to start sending WhatsApp campaigns.
+            </div>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-xs text-amber-800 tabular-nums">
+              Steps: {completedSteps}/{TOTAL_STEPS} complete
+            </span>
+            <Link href="/onboarding">
+              <Button size="sm" className="bg-whatsapp hover:bg-whatsapp-dark text-white">
+                Continue Setup →
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -58,6 +92,16 @@ export default async function SettingsPage() {
           <DefaultsForm />
         </CardContent>
       </Card>
+
+      <div className="text-center pt-4 border-t border-zinc-100">
+        <Link
+          href="/settings/setup"
+          className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900 transition-colors"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Redo Setup Wizard
+        </Link>
+      </div>
     </div>
   );
 }

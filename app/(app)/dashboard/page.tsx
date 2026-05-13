@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { StatsBar } from "@/components/shared/StatsBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConnectionBanner } from "@/components/shared/ConnectionBanner";
+import { SetupWizardBanner } from "@/components/shared/SetupWizardBanner";
 import { Send, FileText, Settings, MessageCircle } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -89,11 +90,21 @@ async function renderDashboard() {
   const whatsappConnected = Boolean(
     user.whatsappApiToken && user.whatsappPhoneNumberId
   );
+  // Phase 7: when the wizard isn't complete AND the user has no token
+  // yet, surface the wizard CTA instead of the generic "WhatsApp not
+  // connected" warning. Users who DID complete the wizard but somehow
+  // lost their token (e.g. revoked in Meta) still get the legacy
+  // ConnectionBanner — that's a different failure mode.
+  const showWizardBanner = !user.wizardCompletedAt && !user.whatsappApiToken;
   const plan = getPlan(user.plan);
 
   return (
     <div className="space-y-8 max-w-7xl">
-      <ConnectionBanner show={!whatsappConnected} />
+      {showWizardBanner ? (
+        <SetupWizardBanner />
+      ) : (
+        <ConnectionBanner show={!whatsappConnected} />
+      )}
 
       <UsageMeter
         plan={plan}

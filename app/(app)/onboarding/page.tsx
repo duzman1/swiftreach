@@ -1,57 +1,44 @@
-// Two-step onboarding shown immediately after sign-up. The user pastes
-// their Meta credentials, tests them against the live API, then sets a few
-// defaults. They can also skip — Settings will show a "WhatsApp not
-// connected" banner until creds are filled in.
+// Phase 7 wizard entry point. Replaces the previous one-page
+// OnboardingForm with a 7-step guided setup. The container is a
+// server component that loads the user's saved progress + saved
+// credentials, then hands off to the client-side <WizardClient />
+// which manages the step-by-step UI.
 //
-// Already-configured users (re-visiting /onboarding manually) get bounced
-// to the dashboard so they don't accidentally re-do setup.
+// Already-completed users (wizardCompletedAt set) bounce to the
+// dashboard so the wizard isn't re-runnable by accident. They can
+// still reach it manually from /settings/setup, which deliberately
+// does NOT enforce this redirect — see app/(app)/settings/page.tsx.
 
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { MessageCircle } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { OnboardingForm } from "./OnboardingForm";
+import { WizardClient } from "./WizardClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function OnboardingPage() {
-  // Auth required — middleware already protects this route, but call
-  // requireUser() to also create the User row on first access if the Clerk
-  // webhook hasn't run yet.
+interface PageProps {
+  searchParams?: { redo?: string };
+}
+
+export default async function OnboardingPage({ searchParams }: PageProps) {
   const user = await requireUser();
 
-  // Already onboarded? Send them home. Covers both paths:
-  //   - User saved their creds (onboardingCompletedAt set on save)
-  //   - User clicked "Skip for now" (onboardingCompletedAt set on skip)
-  // Either way, /onboarding is one-shot — re-visiting it bounces them.
-  if (user.onboardingCompletedAt) {
-    redirect("/");
+  // Already completed? Bounce — unless they explicitly asked to redo
+  // setup via ?redo=1 (the Settings page uses that query string).
+  if (user.wizardCompletedAt && searchParams?.redo !== "1") {
+    redirect("/dashboard");
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 py-10 px-4">
-      <div className="max-w-2xl mx-auto">
-        <Link
-          href="/"
-          className="flex items-center justify-center gap-2 mb-8 text-zinc-700 hover:text-foreground"
-        >
-          <div className="bg-whatsapp rounded-lg p-2">
-            <MessageCircle className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-2xl font-bold tracking-tight">SwiftReach</span>
-        </Link>
-
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">
-            Welcome to SwiftReach!
-          </h1>
-          <p className="text-muted-foreground mt-2">
-            Let&apos;s get you set up. This takes about 2 minutes.
-          </p>
-        </div>
-
-        <OnboardingForm />
-      </div>
+    <div className="max-w-3xl mx-auto py-6 md:py-10 space-y-6">
+      <WizardClient
+        userId={user.id}
+        initial={{
+          step: user.wizardStep ?? 1,
+          phoneNumberId: user.whatsappPhoneNumberId ?? "",
+          businessAccountId: user.whatsappBusinessAccountId ?? "",
+          hasApiToken: Boolean(user.whatsappApiToken),
+        }}
+      />
     </div>
   );
 }
