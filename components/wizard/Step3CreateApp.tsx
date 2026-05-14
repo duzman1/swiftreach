@@ -1,9 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WizardStep } from "./WizardStep";
-import { ScreenshotPlaceholder } from "./ScreenshotPlaceholder";
 
 interface Props {
   onBack: () => void;
@@ -20,9 +20,12 @@ export function Step3CreateApp({ onBack, onNext }: Props) {
       onNext={onNext}
       nextLabel="I've Done This — Next →"
     >
-      <ScreenshotPlaceholder
-        src="step-3-create-app.png"
-        description="Meta dashboard with the Create App button highlighted"
+      <Image
+        src="/setup/step-3-create-app.png"
+        alt="Meta dashboard with the Create App button highlighted"
+        width={800}
+        height={450}
+        className="rounded-lg border border-gray-200 w-full object-contain"
       />
 
       <ol className="list-decimal pl-6 space-y-2 text-sm text-zinc-700">
@@ -48,11 +51,6 @@ export function Step3CreateApp({ onBack, onNext }: Props) {
           <strong>Set Up</strong>.
         </li>
       </ol>
-
-      <ScreenshotPlaceholder
-        src="step-3-add-products.png"
-        description="Add products screen with WhatsApp highlighted"
-      />
 
       <a
         href="https://developers.facebook.com"

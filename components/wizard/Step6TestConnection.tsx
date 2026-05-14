@@ -11,6 +11,7 @@
 //     they've configured Meta.
 
 import * as React from "react";
+import Image from "next/image";
 import {
   ExternalLink,
   Check,
@@ -22,7 +23,6 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { WizardStep } from "./WizardStep";
-import { ScreenshotPlaceholder } from "./ScreenshotPlaceholder";
 
 interface Props {
   userId: string;
@@ -296,9 +296,12 @@ export function Step6TestConnection({ userId, onBack, onNext }: Props) {
         </ol>
 
         <div className="mt-4">
-          <ScreenshotPlaceholder
-            src="step-6-webhook.png"
-            description="Webhook configuration page on Meta for Developers"
+          <Image
+            src="/setup/step-6-webhook.png"
+            alt="Webhook configuration page on Meta for Developers"
+            width={800}
+            height={450}
+            className="rounded-lg border border-gray-200 w-full object-contain"
           />
         </div>
 

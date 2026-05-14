@@ -5,13 +5,13 @@
 // before the save attempt so the user gets immediate feedback.
 
 import * as React from "react";
+import Image from "next/image";
 import { ExternalLink, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WizardStep } from "./WizardStep";
-import { ScreenshotPlaceholder } from "./ScreenshotPlaceholder";
 
 interface Props {
   initialPhoneNumberId?: string;
@@ -97,9 +97,12 @@ export function Step4PhoneNumberId({
       nextDisabled={!isValid}
       loading={saving}
     >
-      <ScreenshotPlaceholder
-        src="step-4-phone-number-id.png"
-        description="WhatsApp Getting Started page with Phone Number ID and Business Account ID circled"
+      <Image
+        src="/setup/step-4-phone-number-id.png"
+        alt="WhatsApp Getting Started page with Phone Number ID and Business Account ID circled"
+        width={800}
+        height={450}
+        className="rounded-lg border border-gray-200 w-full object-contain"
       />
 
       <ol className="list-decimal pl-6 space-y-2 text-sm text-zinc-700">

@@ -1,9 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WizardStep } from "./WizardStep";
-import { ScreenshotPlaceholder } from "./ScreenshotPlaceholder";
 
 interface Props {
   onBack: () => void;
@@ -20,9 +20,12 @@ export function Step2MetaAccount({ onBack, onNext }: Props) {
       onNext={onNext}
       nextLabel="I've Done This — Next →"
     >
-      <ScreenshotPlaceholder
-        src="step-2-meta-developer.png"
-        description="Meta for Developers homepage with the Get Started button highlighted"
+      <Image
+        src="/setup/step-2-meta-developer.png"
+        alt="Meta for Developers homepage with the Get Started button highlighted"
+        width={800}
+        height={450}
+        className="rounded-lg border border-gray-200 w-full object-contain"
       />
 
       <ol className="list-decimal pl-6 space-y-2 text-sm text-zinc-700">

@@ -7,12 +7,12 @@
 // the celebration screen.
 
 import * as React from "react";
+import Image from "next/image";
 import { ExternalLink, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WizardStep } from "./WizardStep";
-import { ScreenshotPlaceholder } from "./ScreenshotPlaceholder";
 
 interface Props {
   onBack: () => void;
@@ -107,9 +107,12 @@ export function Step7Template({ onBack, onFinish, loading }: Props) {
         </ol>
       </div>
 
-      <ScreenshotPlaceholder
-        src="step-7-templates.png"
-        description="Message Templates page on Meta for Developers"
+      <Image
+        src="/setup/step-7-templates.png"
+        alt="Message Templates page on Meta for Developers"
+        width={800}
+        height={450}
+        className="rounded-lg border border-gray-200 w-full object-contain"
       />
 
       <a

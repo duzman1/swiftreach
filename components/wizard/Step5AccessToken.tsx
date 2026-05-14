@@ -5,13 +5,13 @@
 // (AES-256-CBC, see lib/encrypt.ts) before persisting.
 
 import * as React from "react";
+import Image from "next/image";
 import { ExternalLink, AlertCircle, Eye, EyeOff, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WizardStep } from "./WizardStep";
-import { ScreenshotPlaceholder } from "./ScreenshotPlaceholder";
 
 interface Props {
   alreadySaved?: boolean;
@@ -83,9 +83,12 @@ export function Step5AccessToken({ alreadySaved, onBack, onNext }: Props) {
       nextDisabled={!canSubmit && !alreadySaved}
       loading={saving}
     >
-      <ScreenshotPlaceholder
-        src="step-5-system-user.png"
-        description="Meta Business Settings → System Users → Add System User"
+      <Image
+        src="/setup/step-5-system-user.png"
+        alt="Meta Business Settings → System Users → Add System User"
+        width={800}
+        height={450}
+        className="rounded-lg border border-gray-200 w-full object-contain"
       />
 
       <ol className="list-decimal pl-6 space-y-2 text-sm text-zinc-700">
@@ -128,9 +131,12 @@ export function Step5AccessToken({ alreadySaved, onBack, onNext }: Props) {
         </li>
       </ol>
 
-      <ScreenshotPlaceholder
-        src="step-5-token-expiry.png"
-        description="Generate Token screen with Never expiry selected"
+      <Image
+        src="/setup/step-5-token-expiry.png"
+        alt="Generate Token screen with Never expiry selected"
+        width={800}
+        height={450}
+        className="rounded-lg border border-gray-200 w-full object-contain"
       />
 
       <div>
