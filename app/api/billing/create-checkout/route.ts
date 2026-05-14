@@ -2,10 +2,10 @@
 // the /billing page when the user clicks an Upgrade button.
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { getStripe, getPlan, PLANS, type PlanId } from "@/lib/stripe";
+import { getOrCreateCustomer } from "@/lib/stripeCustomer";
 
 export const dynamic = "force-dynamic";
 
@@ -57,25 +57,12 @@ export async function POST(req: NextRequest) {
 
     const stripe = getStripe();
 
-    // Get-or-create the Stripe customer for this user. Storing the id on the
-    // User row means we don't create duplicate customers on repeat checkouts.
-    let customerId = user.stripeCustomerId;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        name: [user.firstName, user.lastName].filter(Boolean).join(" ") || undefined,
-        metadata: { userId: user.id },
-        // Surfaces in the Stripe dashboard customer list so the team can
-        // tell SwiftReach customers apart from any other Stripe accounts
-        // sharing the workspace.
-        description: "SwiftReach subscriber",
-      });
-      customerId = customer.id;
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { stripeCustomerId: customerId },
-      });
-    }
+    // Get-or-create the Stripe customer for this user. The helper verifies
+    // the stored id against the current Stripe account first — if it's
+    // stale (test→live mode flip, Clerk dev→prod migration that pointed at
+    // an old test customer, etc.) it clears the row and creates a fresh
+    // customer so checkout doesn't bomb with "No such customer".
+    const customerId = await getOrCreateCustomer(user);
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
     const session = await stripe.checkout.sessions.create({

@@ -9,10 +9,10 @@
 // the User row. See app/api/billing/webhook/route.ts.
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { getStripe } from "@/lib/stripe";
+import { getOrCreateCustomer } from "@/lib/stripeCustomer";
 
 export const dynamic = "force-dynamic";
 
@@ -34,26 +34,13 @@ export async function POST() {
 
     const stripe = getStripe();
 
-    // Reuse the same customer get-or-create pattern as
-    // /api/billing/create-checkout so subscription + one-time
-    // charges land under the same Stripe Customer for this user.
-    let customerId = user.stripeCustomerId;
-    if (!customerId) {
-      const displayName =
-        [user.firstName, user.lastName].filter(Boolean).join(" ") ||
-        undefined;
-      const customer = await stripe.customers.create({
-        email: user.email,
-        name: displayName,
-        metadata: { userId: user.id },
-        description: "SwiftReach subscriber",
-      });
-      customerId = customer.id;
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { stripeCustomerId: customerId },
-      });
-    }
+    // Reuse the same get-or-create helper so subscription + one-time
+    // charges land under the same Stripe Customer for this user. Also
+    // gives us the stale-customer recovery path: if the stored id is
+    // from a prior test-mode customer that no longer exists in live
+    // mode, the helper clears it and creates a fresh one rather than
+    // 500'ing with "No such customer".
+    const customerId = await getOrCreateCustomer(user);
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
     const displayName =
