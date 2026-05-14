@@ -17,6 +17,7 @@
 import Link from "next/link";
 import { Navbar, MobileTopbar } from "./Navbar";
 import { AnnouncementBanner } from "./AnnouncementBanner";
+import { HelpButton } from "./HelpButton";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -28,6 +29,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <AnnouncementBanner />
           {children}
         </main>
+        {/* Floating help launcher. AppShell only wraps user-facing
+            pages, so the button is automatically absent on /admin
+            (which uses app/admin/layout.tsx instead). */}
+        <HelpButton />
         <footer className="px-6 md:px-10 py-4 text-xs text-muted-foreground border-t bg-background">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
             <div>SwiftReach · swiftreach.app</div>

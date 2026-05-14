@@ -7,7 +7,7 @@ import { StatsBar } from "@/components/shared/StatsBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConnectionBanner } from "@/components/shared/ConnectionBanner";
 import { SetupWizardBanner } from "@/components/shared/SetupWizardBanner";
-import { Send, FileText, Settings, MessageCircle } from "lucide-react";
+import { Send, FileText, Settings, MessageCircle, MessageSquare } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { getPlan } from "@/lib/stripe";
@@ -191,6 +191,12 @@ async function renderDashboard() {
             icon={<Settings className="w-5 h-5" />}
             title="Settings"
             description="Manage your WhatsApp Business connection, sending defaults, and webhook settings."
+          />
+          <QuickLink
+            href="/support"
+            icon={<MessageSquare className="w-5 h-5" />}
+            title="Get Support"
+            description="Need help? We respond in under 24 hours."
           />
         </div>
       </div>

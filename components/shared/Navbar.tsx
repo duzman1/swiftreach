@@ -16,6 +16,7 @@ import {
   Settings,
   CreditCard,
   Lock,
+  LifeBuoy,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -52,6 +53,7 @@ const SECTIONS: { items: NavItem[] }[] = [
   },
   {
     items: [
+      { href: "/support", label: "Support", icon: LifeBuoy },
       { href: "/billing", label: "Billing", icon: CreditCard },
       { href: "/settings", label: "Settings", icon: Settings },
     ],

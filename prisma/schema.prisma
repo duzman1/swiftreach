@@ -96,6 +96,7 @@ model User {
   contactGroups      ContactGroup[]
   inboundMessages    InboundMessage[]
   outboundReplies    OutboundReply[]
+  supportRequests    SupportRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -329,6 +330,33 @@ model InboundMessage {
 
   @@index([userId, read])
   @@index([userId, createdAt])
+}
+
+// In-app customer support requests. Created via POST /api/support;
+// surfaced on /support (per-user history) and /admin/support (admin
+// triage). `reference` is the human-friendly ticket number that admins
+// quote in emails — format SR-YYYY-NNN where NNN is the user's PERSONAL
+// ticket count, not a global counter, so each user's first ticket is
+// always SR-<year>-001 regardless of how many other users have written
+// in.
+model SupportRequest {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reference  String    @unique
+  category   String
+  subject    String
+  message    String
+  priority   String    @default("normal") // low | normal | high | urgent
+  status     String    @default("open") // open | in_progress | resolved | closed
+  adminNotes String?
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status, createdAt])
+  @@index([priority])
 }
 
 // Replies sent from the inbox detail panel. Stored separately from the
