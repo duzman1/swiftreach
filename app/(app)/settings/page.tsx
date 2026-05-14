@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DefaultsForm } from "@/components/settings/DefaultsForm";
 import { WhatsAppCredentialsForm } from "@/components/settings/WhatsAppCredentialsForm";
 import { WebhookUrl } from "@/components/settings/WebhookUrl";
+import { WhatsAppConnectionStatus } from "@/components/settings/WhatsAppConnectionStatus";
 import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -57,16 +58,38 @@ export default async function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>WhatsApp Credentials</CardTitle>
+          <CardTitle>WhatsApp Connection</CardTitle>
           <CardDescription>
-            Get these from the Meta Developer dashboard. See <strong>SETUP.md</strong> for a
-            step-by-step guide.
+            Connect via Meta Embedded Signup, or expand &quot;Advanced —
+            Manual Setup&quot; below to paste credentials directly.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <WhatsAppCredentialsForm />
+          <WhatsAppConnectionStatus
+            connected={Boolean(
+              user.whatsappApiToken && user.whatsappPhoneNumberId
+            )}
+            phoneNumberId={user.whatsappPhoneNumberId ?? null}
+            businessAccountId={user.whatsappBusinessAccountId ?? null}
+          />
         </CardContent>
       </Card>
+
+      <details className="bg-white rounded-md border border-zinc-200 group">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 select-none flex items-center justify-between">
+          <span>Advanced — Manual Setup</span>
+          <span className="text-xs text-zinc-400 group-open:hidden">
+            (click to expand)
+          </span>
+        </summary>
+        <div className="px-4 pb-4 pt-2 border-t border-zinc-100 space-y-2">
+          <p className="text-xs text-zinc-500">
+            For developers. Paste API token, Phone Number ID, and Business
+            Account ID directly. Credentials are stored encrypted.
+          </p>
+          <WhatsAppCredentialsForm />
+        </div>
+      </details>
 
       <Card>
         <CardHeader>

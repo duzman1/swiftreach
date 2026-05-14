@@ -162,3 +162,68 @@ Restart `npm run dev` after editing.
 | `190` — "expired access token" | Your token expired. Generate a permanent one (step 5). |
 | Webhook never fires | Either the URL isn't publicly reachable, or the verify token doesn't match. Re-check both. |
 | Template stuck "pending" | Marketing templates are reviewed by humans. Utility usually clears in minutes. |
+
+---
+
+## Enabling Embedded Signup
+
+Embedded Signup is the one-click connection flow at `/onboarding`. It replaces the manual 7-step wizard for users who don't want to copy-paste tokens. The manual wizard remains as a fallback at `/onboarding?mode=manual`.
+
+**Embedded Signup requires Live mode + Meta Business verification + approved permissions. Until those are done, the button will show a Meta error and users should use Manual mode.**
+
+### Step 1: Enable Embedded Signup on your Meta App
+
+1. Go to https://developers.facebook.com → your app
+2. Click **WhatsApp** in the left sidebar
+3. Click **Embedded Signup**
+4. Click **Get Started** and follow Meta's setup wizard
+
+### Step 2: Create an Embedded Signup Configuration
+
+1. In Embedded Signup, click **Create Configuration**
+2. Name it: `SwiftReach Onboarding`
+3. Set the redirect URL to: `https://www.swiftreach.app/onboarding`
+4. Copy the **Configuration ID**
+5. Add to Vercel env vars: `NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID`
+
+### Step 3: Get your System User Token
+
+This token is used to subscribe each connected WABA to our app's webhooks. It must have `whatsapp_business_management` permission. Never expires (set to "Never").
+
+1. Go to https://business.facebook.com
+2. **Settings → System Users**
+3. Click your system user (or create one)
+4. Generate token with permission: `whatsapp_business_management`
+5. Set expiry to **Never**
+6. Copy the token
+7. Add to Vercel env vars: `META_SYSTEM_USER_TOKEN`
+
+Also add to Vercel:
+- `NEXT_PUBLIC_META_APP_ID` — public, from App Dashboard
+- `META_APP_SECRET` — private, from App Dashboard → Settings → Basic
+
+### Step 4: Switch App to Live Mode
+
+Embedded Signup only works in Live mode.
+1. App Dashboard top bar: toggle from **In Development** → **Live**
+2. This requires completing App Review first.
+
+### Step 5: Complete Meta App Review
+
+Submit your app for review with these permissions:
+- `whatsapp_business_management`
+- `whatsapp_business_messaging`
+- `business_management`
+
+App Review can take 5–10 business days.
+
+### How tokens are stored
+
+| Token | Lifetime | Stored where |
+|---|---|---|
+| User's WhatsApp access token | ~60 days (long-lived) | `User.whatsappApiToken`, encrypted (AES-256-CBC) |
+| System User token | Never (recommended) | Vercel env var only — never per-user |
+| Webhook verify token | Lifetime of the user | `User.webhookVerifyToken`, auto-generated |
+
+When a user's token nears expiry, the **Reconnect WhatsApp** button on `/settings` walks them through Embedded Signup again. Same User row, refreshed token.
+

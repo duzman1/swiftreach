@@ -16,15 +16,11 @@
 // is public (it's the Meta App ID, not the secret) — fine to ship to
 // the browser.
 
-import { useEffect } from "react";
+// Window globals (FB, fbAsyncInit, _wabaId, _phoneNumberId) are declared
+// once in types/global.d.ts. Don't re-declare them here or TS will
+// flag the conflict.
 
-declare global {
-  interface Window {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    FB: any;
-    fbAsyncInit: () => void;
-  }
-}
+import { useEffect } from "react";
 
 interface MetaSDKProps {
   appId: string;
