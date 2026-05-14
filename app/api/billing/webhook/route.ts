@@ -168,6 +168,109 @@ export async function POST(req: NextRequest) {
         }
         break;
       }
+
+      // ─── One-time payment completed — Done-For-You setup service ─────────
+      // Fires for both subscription AND payment-mode checkouts. We only care
+      // when metadata.serviceType identifies the $149 setup payment; every
+      // other checkout.session.completed (e.g. subscription signup) we
+      // ignore here — the subscription.created handler above is the source
+      // of truth for those.
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        if (session.metadata?.serviceType !== "done_for_you_setup") break;
+
+        const userId = session.metadata?.userId;
+        const userEmail = session.metadata?.userEmail ?? null;
+        const userName = session.metadata?.userName ?? null;
+        if (!userId) {
+          // eslint-disable-next-line no-console
+          console.warn("setup checkout missing userId metadata", session.id);
+          break;
+        }
+
+        // 1. Stamp the User row so the admin dashboard + /onboarding success
+        //    banner can see "paid + awaiting fulfilment".
+        const paymentId =
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : session.payment_intent?.id ?? null;
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            setupRequestedAt: new Date(),
+            setupPaid: true,
+            setupPaymentId: paymentId,
+          },
+        });
+
+        // 2. Fire admin + customer emails via Resend. Best-effort: if Resend
+        //    isn't configured, the row update above is enough for the admin
+        //    to see the request in /admin/users/[id] → Account tab.
+        const apiKey = process.env.RESEND_API_KEY?.trim();
+        const adminTo = (process.env.ADMIN_EMAILS ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)[0];
+        const fromAddr =
+          process.env.RESEND_FROM_EMAIL?.trim() ||
+          "SwiftReach <hello@swiftreach.app>";
+
+        if (apiKey && userEmail) {
+          try {
+            const { Resend } = await import("resend");
+            const resend = new Resend(apiKey);
+
+            if (adminTo) {
+              await resend.emails.send({
+                from: fromAddr,
+                to: adminTo,
+                replyTo: userEmail,
+                subject: "💰 New Done-For-You Setup Payment — $149",
+                html: `
+<h2>New Setup Service Payment Received</h2>
+<p><strong>Amount:</strong> $149.00</p>
+<p><strong>Customer:</strong> ${userName ?? "—"}</p>
+<p><strong>Email:</strong> <a href="mailto:${userEmail}">${userEmail}</a></p>
+<p><strong>Payment ID:</strong> ${paymentId ?? "—"}</p>
+<p><strong>Stripe Session:</strong> ${session.id}</p>
+<br>
+<p><strong>Action required:</strong> Contact this customer within 24 hours to begin their setup.</p>
+<p><a href="mailto:${userEmail}">Reply to customer</a></p>
+                `.trim(),
+              });
+            }
+
+            await resend.emails.send({
+              from: fromAddr,
+              to: userEmail,
+              subject: "Your SwiftReach Setup is Confirmed! 🎉",
+              html: `
+<h2>Payment Received — You're All Set!</h2>
+<p>Hi ${(userName ?? "there").split(" ")[0]},</p>
+<p>We received your $149 payment for the Done-For-You Setup service.</p>
+<h3>What happens next:</h3>
+<ol>
+  <li>We will contact you within 24 hours at this email address.</li>
+  <li>We will schedule a time to access your Meta account.</li>
+  <li>We will complete your entire WhatsApp Business API setup.</li>
+  <li>We will send you a test message to confirm everything works.</li>
+</ol>
+<p>Questions? Reply to this email anytime.</p>
+<br>
+<p>— The SwiftReach Team</p>
+              `.trim(),
+            });
+          } catch (err) {
+            // Email failure is non-fatal — payment is recorded.
+            await logError(
+              "billing webhook setup-service email",
+              err,
+              { userId, severity: "warning" }
+            );
+          }
+        }
+        break;
+      }
     }
 
     return NextResponse.json({ ok: true });

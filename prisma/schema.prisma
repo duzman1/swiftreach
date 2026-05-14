@@ -50,6 +50,14 @@ model User {
   wizardCompletedAt DateTime?
   setupRequestedAt  DateTime?
 
+  // Phase 8.1 — Done-For-You Setup paid via Stripe ($149 one-time).
+  // setupPaid flips true when the Stripe `checkout.session.completed`
+  // webhook fires with metadata.serviceType="done_for_you_setup".
+  // setupPaymentId stores the underlying PaymentIntent id so admins
+  // can reconcile in Stripe Dashboard.
+  setupPaid       Boolean @default(false)
+  setupPaymentId  String?
+
   // ── Billing (Phase 4) ─────────────────────────────────────────────────
   // Plan id matches keys in lib/stripe.ts PLANS — the single source of truth
   // for limits/features. NEVER hardcode plan limits anywhere else.

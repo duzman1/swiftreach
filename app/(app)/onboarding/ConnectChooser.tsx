@@ -6,9 +6,13 @@
 // On successful Embedded Signup we swap the cards for the post-connect
 // summary (phone, business name, webhook status, two CTAs). The user
 // stays on /onboarding the whole time — no premature redirects.
+//
+// `?setup=requested` query param surfaces the post-Stripe-checkout
+// success banner above the cards (the user lands here after paying
+// for Done-For-You setup).
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
   HelpCircle,
@@ -26,8 +30,16 @@ interface ConnectedState {
   webhookSubscribed?: boolean;
 }
 
-export function ConnectChooser() {
+interface ConnectChooserProps {
+  /** Used in the post-payment success banner copy. Passed from the
+   * server page since the chooser is a client component. */
+  userEmail?: string;
+}
+
+export function ConnectChooser({ userEmail }: ConnectChooserProps = {}) {
   const router = useRouter();
+  const params = useSearchParams();
+  const setupRequested = params?.get("setup") === "requested";
   const [dfyOpen, setDfyOpen] = React.useState(false);
   const [connected, setConnected] = React.useState<ConnectedState | null>(null);
 
@@ -99,6 +111,24 @@ export function ConnectChooser() {
           Choose how you&apos;d like to connect:
         </p>
       </header>
+
+      {setupRequested && (
+        <div
+          role="status"
+          className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 flex items-start gap-3"
+        >
+          <Check className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-emerald-900">
+            <div className="font-semibold">Payment received!</div>
+            <div className="text-emerald-800/90 mt-0.5">
+              We&apos;ll contact you at{" "}
+              <strong>{userEmail ?? "your email"}</strong> within 24 hours
+              to schedule your setup. In the meantime, feel free to explore
+              SwiftReach.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PRIMARY — Embedded Signup */}
       <div className="bg-white rounded-xl border-2 border-[#25D366] p-6 shadow-sm hover:shadow transition-shadow">

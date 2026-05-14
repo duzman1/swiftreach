@@ -46,10 +46,11 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
     );
   }
 
-  // Default: the new chooser screen.
+  // Default: the new chooser screen. Pass userEmail so the Stripe-return
+  // success banner can address the user directly.
   return (
     <div className="max-w-3xl mx-auto py-6 md:py-10">
-      <ConnectChooser />
+      <ConnectChooser userEmail={user.email} />
     </div>
   );
 }
