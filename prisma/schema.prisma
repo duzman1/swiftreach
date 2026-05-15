@@ -97,6 +97,7 @@ model User {
   inboundMessages    InboundMessage[]
   outboundReplies    OutboundReply[]
   supportRequests    SupportRequest[]
+  apiKeys            ApiKey[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -330,6 +331,53 @@ model InboundMessage {
 
   @@index([userId, read])
   @@index([userId, createdAt])
+}
+
+// Phase 8 — webhook API. Per-user API keys for triggering WhatsApp
+// sends from external platforms (Zapier, Make, n8n, custom code). The
+// plain key is shown to the user ONCE at creation; only the bcrypt
+// hash is stored. keyPrefix + keySuffix exist purely for "is this the
+// key labelled Zapier?" UI display — never enough to reconstruct.
+model ApiKey {
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String // user-given label, e.g. "Zapier"
+  keyHash      String       @unique // bcrypt hash of the full key
+  keyPrefix    String // first 12 chars: "sr_live_abcd"
+  keySuffix    String // last 4 chars
+  isActive     Boolean      @default(true)
+  lastUsedAt   DateTime?
+  requestCount Int          @default(0)
+  createdAt    DateTime     @default(now())
+  revokedAt    DateTime?
+  logs         WebhookLog[]
+
+  @@index([userId])
+  @@index([keyPrefix, isActive])
+}
+
+// One row per webhook trigger attempt — successful, failed, OR
+// rate-limited. Surfaces in /settings/api-keys per-key log AND
+// /admin/api-usage platform-wide stats.
+model WebhookLog {
+  id             String   @id @default(cuid())
+  apiKeyId       String
+  apiKey         ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  userId         String
+  phoneNumber    String
+  messageType    String // freeform | template
+  templateName   String?
+  variables      String? // JSON
+  status         String // success | failed | rate_limited | invalid
+  errorMessage   String?
+  whatsappMsgId  String?
+  responseTimeMs Int?
+  createdAt      DateTime @default(now())
+
+  @@index([apiKeyId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 // In-app customer support requests. Created via POST /api/support;

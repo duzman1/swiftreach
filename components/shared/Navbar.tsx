@@ -17,6 +17,7 @@ import {
   CreditCard,
   Lock,
   LifeBuoy,
+  Code2,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,7 @@ const SECTIONS: { items: NavItem[] }[] = [
     items: [
       { href: "/support", label: "Support", icon: LifeBuoy },
       { href: "/billing", label: "Billing", icon: CreditCard },
+      { href: "/settings/api-keys", label: "API Keys", icon: Code2, paidOnly: true },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
@@ -122,6 +124,24 @@ export function Navbar() {
   const paid = isPaid(billing?.plan ?? null);
   const inboxCount = useInboxUnread(paid);
 
+  // Single "active" href computed up front so that, e.g. on /settings/api-keys
+  // the broader /settings link doesn't also light up. We pick the longest
+  // href whose prefix the current pathname matches.
+  const activeHref = React.useMemo(() => {
+    const all = SECTIONS.flatMap((s) => s.items.map((i) => i.href));
+    let best: { href: string; len: number } | null = null;
+    for (const href of all) {
+      const match =
+        href === "/"
+          ? pathname === "/"
+          : pathname === href || pathname.startsWith(href + "/");
+      if (match && (!best || href.length > best.len)) {
+        best = { href, len: href.length };
+      }
+    }
+    return best?.href ?? null;
+  }, [pathname]);
+
   return (
     <aside className="flex w-64 shrink-0 flex-col bg-zinc-900 text-zinc-100 min-h-screen p-4">
       <div className="flex items-center px-2 py-4 mb-4">
@@ -143,11 +163,7 @@ export function Navbar() {
               <NavLink
                 key={item.href}
                 item={item}
-                active={
-                  item.href === "/"
-                    ? pathname === "/"
-                    : pathname.startsWith(item.href)
-                }
+                active={item.href === activeHref}
                 paid={paid}
                 inboxCount={inboxCount}
               />

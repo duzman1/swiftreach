@@ -16,6 +16,7 @@ import {
   ArrowLeft,
   ShieldCheck,
   LifeBuoy,
+  Webhook,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,7 @@ const NAV = [
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/subscriptions", label: "Subscriptions", icon: CreditCard },
   { href: "/admin/campaigns", label: "Campaigns", icon: Send },
+  { href: "/admin/api-usage", label: "API Usage", icon: Webhook },
   { href: "/admin/support", label: "Support", icon: LifeBuoy },
   { href: "/admin/system", label: "System", icon: Activity },
   { href: "/admin/announcements", label: "Announcements", icon: Megaphone },

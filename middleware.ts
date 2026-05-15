@@ -23,7 +23,9 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   "/terms",                     // Public legal page — Google OAuth requires it
   "/privacy",                   // Public legal page — Google OAuth requires it
+  "/developers",                // Public API documentation
   "/api/webhook(.*)",           // Meta WhatsApp webhook (incl. /api/webhook/[userId])
+  "/api/webhooks/(.*)",         // Developer-facing webhook API (auth via API key)
   "/api/clerk-webhook",         // Clerk user lifecycle webhook
   "/api/billing/webhook",       // Stripe billing webhook
   "/api/cron/(.*)",             // Vercel Cron — protected by CRON_SECRET header
