@@ -26,6 +26,7 @@ const isPublicRoute = createRouteMatcher([
   "/developers",                // Public API documentation
   "/api/webhook(.*)",           // Meta WhatsApp webhook (incl. /api/webhook/[userId])
   "/api/webhooks/(.*)",         // Developer-facing webhook API (auth via API key)
+  "/api/zapier/(.*)",           // Zapier auth + actions (auth via API key)
   "/api/clerk-webhook",         // Clerk user lifecycle webhook
   "/api/billing/webhook",       // Stripe billing webhook
   "/api/cron/(.*)",             // Vercel Cron — protected by CRON_SECRET header

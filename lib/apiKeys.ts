@@ -51,23 +51,57 @@ export async function verifyApiKey(
 }
 
 /**
- * Pull the API key out of the request. Three accepted forms:
+ * Pull the API key out of the request. Accepted forms:
  *   - Authorization: Bearer sr_live_...
  *   - X-API-Key: sr_live_...
+ *   - X-API-KEY: sr_live_...        (Zapier's casing)
+ *   - ?api_key=sr_live_... in URL   (Zapier fallback for connectors
+ *     that can't set custom headers)
  *   - body.api_key (for legacy clients that can't set headers)
+ *
+ * Note: Fetch's Headers.get() is case-insensitive, so X-API-Key and
+ * X-API-KEY resolve via the same lookup — we list both for clarity
+ * and so the explicit Zapier path is obvious to readers.
  */
 export function extractApiKey(
   request: Request,
   body?: { api_key?: unknown } | null
 ): string | null {
-  const auth = request.headers.get("Authorization");
-  if (auth?.startsWith("Bearer ")) return auth.slice(7).trim();
+  // Check Authorization header
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice(7).trim();
+  }
 
-  const headerKey = request.headers.get("X-API-Key");
-  if (headerKey) return headerKey.trim();
+  // Check X-API-Key header
+  const apiKeyHeader = request.headers.get("X-API-Key");
+  if (apiKeyHeader) {
+    return apiKeyHeader.trim();
+  }
 
+  // Check X-API-KEY header (Zapier sends this)
+  const zapierHeader = request.headers.get("X-API-KEY");
+  if (zapierHeader) {
+    return zapierHeader.trim();
+  }
+
+  // Check URL query parameter (Zapier fallback)
+  try {
+    const url = new URL(request.url);
+    const queryKey = url.searchParams.get("api_key");
+    if (queryKey) {
+      return queryKey.trim();
+    }
+  } catch {
+    // request.url may be missing/relative in some test environments —
+    // ignore and fall through to the body check.
+  }
+
+  // Check request body
   const bodyKey = body?.api_key;
-  if (typeof bodyKey === "string" && bodyKey.trim()) return bodyKey.trim();
+  if (typeof bodyKey === "string" && bodyKey.trim()) {
+    return bodyKey.trim();
+  }
 
   return null;
 }
