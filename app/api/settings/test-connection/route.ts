@@ -75,9 +75,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         phoneNumberId: info.phoneNumberId,
+        // May be undefined — Meta omits display_phone_number from the
+        // safe field set we request. Keep returning the key so existing
+        // clients don't blow up.
         displayPhoneNumber: info.displayPhoneNumber,
         verifiedName: info.verifiedName,
         qualityRating: info.qualityRating,
+        platformType: info.platformType,
       });
     }
     return NextResponse.json(

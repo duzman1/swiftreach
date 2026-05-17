@@ -226,9 +226,16 @@ export function buildTemplateComponents(
 export interface ConnectionInfo {
   ok: boolean;
   phoneNumberId?: string;
+  /**
+   * Meta only returns display_phone_number for fully-provisioned numbers.
+   * Test/sandbox numbers and some WABA configurations omit it — we no
+   * longer request it explicitly (caused [100] "nonexisting field"
+   * errors), so this is optional and may be undefined even on success.
+   */
   displayPhoneNumber?: string;
   verifiedName?: string;
   qualityRating?: string;
+  platformType?: string;
   error?: SendError;
 }
 
@@ -240,22 +247,28 @@ export async function getPhoneNumberInfo(
     return { ok: false, error: configMissingError() };
   }
   try {
-    const response = await axios.get(
-      graphUrl(c.apiVersion!, c.phoneNumberId),
-      {
-        headers: authHeader(c.apiToken),
-        timeout: 15000,
-        params: {
-          fields: "display_phone_number,verified_name,quality_rating",
-        },
-      }
+    // Safe field set — Meta rejects display_phone_number on some
+    // accounts with [100] (#100) Tried accessing nonexisting field.
+    // id, verified_name, quality_rating, platform_type all work
+    // across Cloud API, On-Premises, sandbox, and live numbers.
+    const verifyUrl = new URL(graphUrl(c.apiVersion!, c.phoneNumberId));
+    verifyUrl.searchParams.set(
+      "fields",
+      "id,verified_name,quality_rating,platform_type"
     );
+    const response = await axios.get(verifyUrl.toString(), {
+      headers: authHeader(c.apiToken),
+      timeout: 15000,
+    });
     return {
       ok: true,
       phoneNumberId: c.phoneNumberId,
+      // Meta no longer returns this in the safe field set; keep the
+      // key in the response shape so callers don't break.
       displayPhoneNumber: response.data?.display_phone_number,
       verifiedName: response.data?.verified_name,
       qualityRating: response.data?.quality_rating,
+      platformType: response.data?.platform_type,
     };
   } catch (err) {
     return { ok: false, error: parseAxiosError(err) };
