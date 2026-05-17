@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Cloud, Loader2, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import type { ParsedFile } from "@/lib/parseFile";
+import { SheetPicker } from "./SheetPicker";
+import type { ParsedFile, SheetMeta } from "@/lib/parseFile";
 
 const PAID_PLANS = ["starter", "growth"];
 
@@ -69,8 +70,9 @@ declare global {
 }
 
 const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const MIME_GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet";
 const ALLOWED_MIMES = [
-  "application/vnd.google-apps.spreadsheet",
+  MIME_GOOGLE_SHEET,
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/csv",
 ].join(",");
@@ -79,7 +81,34 @@ interface Props {
   onParsed: (parsed: ParsedFile) => void;
 }
 
-type Phase = "idle" | "connecting" | "downloading" | "error";
+// Sheet selection payload returned by /api/drive/import or /api/drive/sheets
+// when the picked file has multiple non-empty tabs. We re-use the local
+// SheetMeta shape — server is responsible for normalising rowCount/isEmpty
+// for Excel; for Google Sheets we fill them in here with placeholders that
+// the picker UI still renders sensibly.
+interface RemoteSheet {
+  id: number;
+  name: string;
+  index: number;
+  rowCount?: number;
+  isEmpty?: boolean;
+}
+
+interface SheetSelectionState {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  accessToken: string;
+  sheets: RemoteSheet[];
+  defaultSheetIndex?: number;
+}
+
+type Phase =
+  | "idle"
+  | "connecting"
+  | "downloading"
+  | "sheet_selection"
+  | "error";
 
 function loadScriptOnce(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -100,6 +129,9 @@ export function GoogleDrivePicker({ onParsed }: Props) {
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [activeName, setActiveName] = React.useState<string>("");
   const [error, setError] = React.useState<string | null>(null);
+  const [selection, setSelection] = React.useState<SheetSelectionState | null>(
+    null
+  );
   const tokenClientRef = React.useRef<TokenClient | null>(null);
 
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
@@ -130,7 +162,14 @@ export function GoogleDrivePicker({ onParsed }: Props) {
     await loadScriptOnce("https://accounts.google.com/gsi/client");
   }, []);
 
-  async function importFile(doc: DriveDoc, accessToken: string) {
+  // Drive import call. `selectedSheet` is set when the user picks a tab
+  // from the in-app SheetPicker (re-call after a needsSheetSelection
+  // response).
+  async function importFile(
+    doc: DriveDoc,
+    accessToken: string,
+    selectedSheet?: { name?: string; index?: number }
+  ) {
     setPhase("downloading");
     setActiveName(doc.name);
     try {
@@ -142,14 +181,15 @@ export function GoogleDrivePicker({ onParsed }: Props) {
           fileName: doc.name,
           mimeType: doc.mimeType,
           accessToken,
+          ...(selectedSheet?.name ? { sheetName: selectedSheet.name } : {}),
+          ...(typeof selectedSheet?.index === "number"
+            ? { sheetIndex: selectedSheet.index }
+            : {}),
         }),
       });
       const data = await res.json();
+
       if (res.status === 403) {
-        // Server enforces the same plan gate (defence in depth).
-        // Stale client cache → server upgradeRequired response →
-        // redirect to billing page with feature context, matching the
-        // client-side guard.
         const target =
           (typeof data.redirectTo === "string" && data.redirectTo) ||
           "/billing?feature=google-drive-import";
@@ -157,6 +197,21 @@ export function GoogleDrivePicker({ onParsed }: Props) {
         setPhase("idle");
         return;
       }
+
+      // Multi-sheet branch — server is asking the user to pick a tab.
+      if (data.ok && data.needsSheetSelection) {
+        setSelection({
+          fileId: doc.id,
+          fileName: doc.name,
+          mimeType: doc.mimeType,
+          accessToken,
+          sheets: data.sheets as RemoteSheet[],
+          defaultSheetIndex: data.defaultSheetIndex,
+        });
+        setPhase("sheet_selection");
+        return;
+      }
+
       if (!data.ok) {
         const msg: string = data.error ?? "Import failed";
         setError(msg);
@@ -164,9 +219,11 @@ export function GoogleDrivePicker({ onParsed }: Props) {
         setPhase("error");
         return;
       }
+
       toast.success(`Imported "${doc.name}" from Google Drive`);
       onParsed(data.parsed as ParsedFile);
       setPhase("idle");
+      setSelection(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error";
       setError(msg);
@@ -251,6 +308,54 @@ export function GoogleDrivePicker({ onParsed }: Props) {
     }
   }
 
+  // ── Sheet picker view ─────────────────────────────────────────────────
+  if (phase === "sheet_selection" && selection) {
+    const isGoogleSheet = selection.mimeType === MIME_GOOGLE_SHEET;
+    // Map remote sheet payload onto SheetMeta. For Google Sheets we
+    // don't have a real data-row count (the Sheets API only gives a
+    // grid dimension), so rowCount is shown as a dash via -1 sentinel.
+    const sheetMetas: SheetMeta[] = selection.sheets.map((s) => ({
+      name: s.name,
+      index: s.index,
+      rowCount: s.rowCount ?? -1,
+      isEmpty: s.isEmpty ?? false,
+    }));
+    const defaultIdx =
+      typeof selection.defaultSheetIndex === "number"
+        ? selection.defaultSheetIndex
+        : sheetMetas.find((s) => !s.isEmpty)?.index ?? 0;
+
+    return (
+      <SheetPicker
+        fileName={selection.fileName}
+        sheets={sheetMetas}
+        defaultSheetIndex={defaultIdx}
+        onConfirm={(idx) => {
+          const chosen = selection.sheets.find((s) => s.index === idx);
+          if (!chosen) return;
+          // Google Sheets values endpoint is name-keyed; Excel parsing
+          // is index-keyed. Send whichever the backend needs.
+          void importFile(
+            {
+              id: selection.fileId,
+              name: selection.fileName,
+              mimeType: selection.mimeType,
+            },
+            selection.accessToken,
+            isGoogleSheet
+              ? { name: chosen.name }
+              : { index: chosen.index }
+          );
+        }}
+        onCancel={() => {
+          setSelection(null);
+          setPhase("idle");
+        }}
+        loading={false}
+      />
+    );
+  }
+
   const busy = phase === "connecting" || phase === "downloading";
 
   let buttonText: string;
@@ -268,15 +373,7 @@ export function GoogleDrivePicker({ onParsed }: Props) {
       <Button
         type="button"
         variant="outline"
-        onClick={() => {
-          // TEMPORARY DEBUG — bypasses start() entirely. If clicking this
-          // button still opens the Google Picker, the click is being
-          // intercepted somewhere ELSE (different component, parent
-          // overlay, or browser running a stale bundle). Revert once the
-          // wiring is confirmed.
-          console.log("DRIVE BUTTON CLICKED");
-          window.location.href = "/billing?feature=google-drive-import";
-        }}
+        onClick={() => void start()}
         disabled={busy}
         className="gap-2"
       >

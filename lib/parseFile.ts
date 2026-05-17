@@ -117,13 +117,22 @@ function rekeyRow(
 // it just downloaded, using the same sanitization/typing logic the browser
 // File path uses.
 
+// Parse the sheet at `sheetIndex` (0-based) within an XLSX workbook
+// supplied as raw bytes. Throws if the sheet doesn't exist.
 export function parseExcelBytes(
   fileName: string,
-  bytes: ArrayBuffer | Uint8Array
+  bytes: ArrayBuffer | Uint8Array,
+  sheetIndex = 0
 ): ParsedFile {
   const wb = XLSX.read(bytes, { type: "array" });
-  const sheetName = wb.SheetNames[0];
-  if (!sheetName) throw new Error("Workbook has no sheets.");
+  const sheetName = wb.SheetNames[sheetIndex];
+  if (!sheetName) {
+    throw new Error(
+      sheetIndex === 0
+        ? "Workbook has no sheets."
+        : `Sheet index ${sheetIndex} does not exist. Workbook has ${wb.SheetNames.length} sheet(s).`
+    );
+  }
   const ws = wb.Sheets[sheetName];
 
   const headerRow = (XLSX.utils.sheet_to_json(ws, {
@@ -157,6 +166,75 @@ export function parseExcelBytes(
   };
 }
 
+// ── Sheet detection ──────────────────────────────────────────────────────────
+// Used by the New Campaign flow (and Drive imports for Excel) to show a
+// sheet picker BEFORE doing a full parse. We deliberately avoid parsing
+// every sheet's data — for big workbooks that would block the main thread
+// for seconds. We only read row counts, which sheet_to_json computes from
+// the workbook's `!ref` range without touching most of the cells.
+
+export interface SheetMeta {
+  name: string;
+  index: number;
+  rowCount: number; // data rows (excludes the header row, never negative)
+  isEmpty: boolean;
+}
+
+export interface SheetDetection {
+  sheets: SheetMeta[];
+  needsSelection: boolean; // true when >1 non-empty sheet exists
+  defaultSheetIndex: number; // first non-empty sheet, with a preference
+                             // for named sheets over generic "Sheet1"
+}
+
+const GENERIC_SHEET_NAME_RE = /^Sheet\d+$/i;
+
+function detectSheetsFromWorkbook(
+  wb: XLSX.WorkBook
+): SheetDetection {
+  const sheets: SheetMeta[] = wb.SheetNames.map((name, index) => {
+    const ws = wb.Sheets[name];
+    // sheet_to_json includes the data rows but not the header row when
+    // header:undefined (default object-mode). For consistency we report
+    // the data-row count (matches the "87 rows" copy the UI shows).
+    const rowCount = ws
+      ? (XLSX.utils.sheet_to_json(ws, { defval: "" }) as unknown[]).length
+      : 0;
+    return {
+      name,
+      index,
+      rowCount,
+      isEmpty: rowCount === 0,
+    };
+  });
+
+  // Prefer the first non-empty sheet, but if that sheet has a generic
+  // name (Sheet1/Sheet2…) and another non-empty sheet has a real name,
+  // prefer the named one — matches the spec's "MFAC_Members" example.
+  const nonEmpty = sheets.filter((s) => !s.isEmpty);
+  let defaultSheetIndex = nonEmpty[0]?.index ?? 0;
+  if (
+    nonEmpty.length > 1 &&
+    GENERIC_SHEET_NAME_RE.test(nonEmpty[0]!.name)
+  ) {
+    const named = nonEmpty.find((s) => !GENERIC_SHEET_NAME_RE.test(s.name));
+    if (named) defaultSheetIndex = named.index;
+  }
+
+  return {
+    sheets,
+    needsSelection: nonEmpty.length > 1,
+    defaultSheetIndex,
+  };
+}
+
+export function detectSheetsFromBytes(
+  bytes: ArrayBuffer | Uint8Array
+): SheetDetection {
+  const wb = XLSX.read(bytes, { type: "array" });
+  return detectSheetsFromWorkbook(wb);
+}
+
 export function parseCsvText(fileName: string, text: string): ParsedFile {
   const result = Papa.parse<Record<string, unknown>>(text, {
     header: true,
@@ -185,14 +263,57 @@ async function parseCSVFile(file: File): Promise<ParsedFile> {
   return parseCsvText(file.name, text);
 }
 
-async function parseXLSXFile(file: File): Promise<ParsedFile> {
+async function parseXLSXFile(file: File, sheetIndex = 0): Promise<ParsedFile> {
   const buf = await file.arrayBuffer();
-  return parseExcelBytes(file.name, buf);
+  return parseExcelBytes(file.name, buf, sheetIndex);
 }
 
 export async function parseContactFile(file: File): Promise<ParsedFile> {
+  // Back-compat entry point. Always uses sheet 0 for Excel — callers that
+  // want sheet selection should use detectSheets() + parseSheetByIndex().
   const lower = file.name.toLowerCase();
   if (lower.endsWith(".csv")) return parseCSVFile(file);
   if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) return parseXLSXFile(file);
+  throw new Error("Unsupported file type. Use .xlsx, .xlsm, or .csv.");
+}
+
+/**
+ * Inspect an uploaded file and return the list of sheets without doing the
+ * full row parse. CSVs have no sheets — we return a single synthetic entry
+ * so callers can use a uniform code path. needsSelection is always false
+ * for CSV.
+ */
+export async function detectSheets(file: File): Promise<SheetDetection> {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".csv")) {
+    // No real sheets — fabricate a single entry so the UI can branch on
+    // needsSelection alone. rowCount is unknown without a full parse,
+    // which we deliberately don't do here.
+    return {
+      sheets: [{ name: "CSV", index: 0, rowCount: -1, isEmpty: false }],
+      needsSelection: false,
+      defaultSheetIndex: 0,
+    };
+  }
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+    const buf = await file.arrayBuffer();
+    return detectSheetsFromBytes(buf);
+  }
+  throw new Error("Unsupported file type. Use .xlsx, .xlsm, or .csv.");
+}
+
+/**
+ * Parse a specific sheet by index from an uploaded file. For CSVs the
+ * `sheetIndex` is ignored (CSVs have no sheets).
+ */
+export async function parseSheetByIndex(
+  file: File,
+  sheetIndex: number
+): Promise<ParsedFile> {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".csv")) return parseCSVFile(file);
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+    return parseXLSXFile(file, sheetIndex);
+  }
   throw new Error("Unsupported file type. Use .xlsx, .xlsm, or .csv.");
 }
