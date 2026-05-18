@@ -40,16 +40,28 @@ export function ProgressPanel({ campaignId, campaignName, initialTotal, onDone }
   const [error, setError] = React.useState<string | null>(null);
   const startedAt = React.useRef<number>(Date.now());
 
-  const eventSourceRef = React.useRef<EventSource | null>(null);
+  // Use fetch + ReadableStream instead of EventSource. EventSource
+  // silently swallows non-2xx HTTP responses, which made every early
+  // exit in the send route (400 "credentials not set", 403 suspended,
+  // 403 plan limit, 404 campaign not found, 401 unauthorized) look
+  // like a stuck "sending…" forever. With fetch we see res.status and
+  // res.body, so the actual error reaches the UI + console.
+  const abortRef = React.useRef<AbortController | null>(null);
 
   const openStream = React.useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    const es = new EventSource(`/api/campaigns/${campaignId}/send`);
-    eventSourceRef.current = es;
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    // STEP 4 debug log — confirms this code path ran and the URL is built.
+    // eslint-disable-next-line no-console
+    console.log("[ProgressPanel] Starting campaign send:", {
+      campaignId,
+      url: `/api/campaigns/${campaignId}/send`,
+    });
+
     setStatus("sending");
+    setError(null);
     startedAt.current = Date.now();
 
     function handle(name: ProgressEvent["type"], rawData: string) {
@@ -67,43 +79,98 @@ export function ProgressPanel({ campaignId, campaignName, initialTotal, onDone }
           if (data.phone) setCurrent({ phone: data.phone });
         } else if (name === "paused") {
           setStatus("paused");
-          es.close();
+          ac.abort();
         } else if (name === "cancelled") {
           setStatus("cancelled");
-          es.close();
+          ac.abort();
           onDone?.();
         } else if (name === "completed") {
           setStatus("completed");
-          es.close();
+          ac.abort();
           onDone?.();
         } else if (name === "error") {
           setStatus("error");
           setError(data.message ?? "Stream error");
-          es.close();
+          ac.abort();
         }
       } catch {
         /* ignore parse errors */
       }
     }
 
-    es.addEventListener("started", (e: MessageEvent) => handle("started", e.data));
-    es.addEventListener("progress", (e: MessageEvent) => handle("progress", e.data));
-    es.addEventListener("paused", (e: MessageEvent) => handle("paused", e.data));
-    es.addEventListener("cancelled", (e: MessageEvent) => handle("cancelled", e.data));
-    es.addEventListener("completed", (e: MessageEvent) => handle("completed", e.data));
-    es.addEventListener("error", (e: MessageEvent) => handle("error", e.data));
-
-    es.onerror = () => {
-      // Native EventSource error (vs the named 'error' event above) — connection lost
-      if (es.readyState === EventSource.CLOSED) {
-        setStatus((s) => (s === "sending" ? "error" : s));
+    void (async () => {
+      let res: Response;
+      try {
+        res = await fetch(`/api/campaigns/${campaignId}/send`, {
+          method: "GET",
+          signal: ac.signal,
+          headers: { Accept: "text/event-stream" },
+          cache: "no-store",
+        });
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
+        // eslint-disable-next-line no-console
+        console.error("[ProgressPanel] Send fetch threw:", err);
+        setStatus("error");
+        setError(err instanceof Error ? err.message : "Network error");
+        return;
       }
-    };
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        // eslint-disable-next-line no-console
+        console.error("[ProgressPanel] Send failed:", res.status, text);
+        setStatus("error");
+        setError(
+          `Server returned ${res.status}: ${text || "(no error body)"}`
+        );
+        return;
+      }
+
+      if (!res.body) {
+        // eslint-disable-next-line no-console
+        console.error("[ProgressPanel] Response has no body");
+        setStatus("error");
+        setError("Server returned no body — cannot stream.");
+        return;
+      }
+
+      // Parse `event:`/`data:` frames separated by blank lines.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          buf += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            let evType = "message";
+            let evData = "";
+            for (const line of frame.split("\n")) {
+              if (line.startsWith("event:")) evType = line.slice(6).trim();
+              else if (line.startsWith("data:")) evData += line.slice(5).trim();
+            }
+            handle(evType as ProgressEvent["type"], evData);
+          }
+        }
+      } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
+        // eslint-disable-next-line no-console
+        console.error("[ProgressPanel] Stream read error:", err);
+        setStatus("error");
+        setError(err instanceof Error ? err.message : "Stream read error");
+      }
+    })();
   }, [campaignId, onDone]);
 
   React.useEffect(() => {
     openStream();
-    return () => eventSourceRef.current?.close();
+    return () => abortRef.current?.abort();
   }, [openStream]);
 
   async function pause() {
@@ -119,7 +186,7 @@ export function ProgressPanel({ campaignId, campaignName, initialTotal, onDone }
   async function cancel() {
     if (!confirm("Cancel this campaign? Remaining messages will not be sent.")) return;
     await fetch(`/api/campaigns/${campaignId}/cancel`, { method: "PUT" });
-    eventSourceRef.current?.close();
+    abortRef.current?.abort();
     setStatus("cancelled");
   }
 

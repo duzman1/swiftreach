@@ -572,17 +572,23 @@ export function WizardSend() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      if (!data.ok) {
-        setCreateError(data.error ?? "Failed to create campaign");
+      const data = await res.json().catch(() => ({} as { ok?: boolean; error?: string; campaign?: { id: string; name: string } }));
+      if (!res.ok || !data.ok) {
+        // eslint-disable-next-line no-console
+        console.error("[WizardSend] POST /api/campaigns failed:", res.status, data);
+        setCreateError(data.error ?? `Failed to create campaign (HTTP ${res.status})`);
         toast.error(data.error ?? "Failed to create campaign");
         return;
       }
-      toast.success(`Campaign "${data.campaign.name}" started`);
+      // eslint-disable-next-line no-console
+      console.log("[WizardSend] Campaign created, mounting ProgressPanel:", data.campaign);
+      toast.success(`Campaign "${data.campaign?.name}" started`);
       await maybeSaveToBook();
-      setRunning(data.campaign);
+      setRunning(data.campaign!);
       setConfirmOpen(false);
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[WizardSend] POST /api/campaigns threw:", err);
       setCreateError(err instanceof Error ? err.message : "Network error");
     } finally {
       setCreating(false);
