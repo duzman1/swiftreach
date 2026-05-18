@@ -263,6 +263,26 @@ export async function GET(
                 rowData,
                 staticVars
               );
+              // DEBUG: surface exactly what we're about to send for this
+              // contact, including the resolved components. The matching
+              // log in lib/whatsapp.ts shows the final axios body — both
+              // are tagged "META API PAYLOAD" so they're easy to grep.
+              // eslint-disable-next-line no-console
+              console.log(
+                "META API PAYLOAD:",
+                JSON.stringify(
+                  {
+                    campaignId,
+                    contactId: c.id,
+                    to: c.phoneNumber,
+                    template: campaignTemplateName,
+                    language: "en_US",
+                    components,
+                  },
+                  null,
+                  2
+                )
+              );
               return sendTemplateMessage(
                 c.phoneNumber,
                 campaignTemplateName,

@@ -144,25 +144,62 @@ export async function sendTemplateMessage(
   if (!c.apiToken || !c.phoneNumberId) {
     return { success: false, error: configMissingError() };
   }
-  try {
-    const response = await axios.post(
-      graphUrl(c.apiVersion!, `${c.phoneNumberId}/messages`),
+  const url = graphUrl(c.apiVersion!, `${c.phoneNumberId}/messages`);
+  const body = {
+    messaging_product: "whatsapp",
+    to: phoneNumber,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: language },
+      components,
+    },
+  };
+  // DEBUG: log the exact URL + body we're about to POST so we can see
+  // what Meta actually receives. The matching log in the campaign send
+  // route shows the caller-side view — both are tagged so they're easy
+  // to grep in Vercel logs.
+  // eslint-disable-next-line no-console
+  console.log(
+    "META API PAYLOAD:",
+    JSON.stringify(
       {
-        messaging_product: "whatsapp",
-        to: phoneNumber,
-        type: "template",
-        template: {
-          name: templateName,
-          language: { code: language },
-          components,
-        },
+        url,
+        apiVersion: c.apiVersion,
+        phoneNumberId: c.phoneNumberId,
+        body,
       },
-      { headers: authHeader(c.apiToken), timeout: 30000 }
-    );
+      null,
+      2
+    )
+  );
+  try {
+    const response = await axios.post(url, body, {
+      headers: authHeader(c.apiToken),
+      timeout: 30000,
+    });
     const messageId = response.data?.messages?.[0]?.id;
     return { success: true, messageId };
   } catch (err) {
-    return { success: false, error: parseAxiosError(err) };
+    const parsed = parseAxiosError(err);
+    // DEBUG: surface Meta's error response so we can see exactly what
+    // they complained about (often more detail than the parsed code).
+    // eslint-disable-next-line no-console
+    console.log(
+      "META API ERROR:",
+      JSON.stringify(
+        {
+          template: templateName,
+          to: phoneNumber,
+          httpStatus: parsed.httpStatus,
+          code: parsed.code,
+          message: parsed.message,
+        },
+        null,
+        2
+      )
+    );
+    return { success: false, error: parsed };
   }
 }
 
