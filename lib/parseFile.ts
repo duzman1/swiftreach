@@ -135,10 +135,17 @@ export function parseExcelBytes(
   }
   const ws = wb.Sheets[sheetName];
 
+  // raw:false forces SheetJS to return formatted strings instead of
+  // the underlying serial numbers / Date objects. dateNF pins the
+  // date format so dates round-trip as "5/31/2026" regardless of the
+  // cell's stored Excel format — without it, the user can see one
+  // column show "44927" and another show "31-Jan-23" depending on
+  // how the workbook was authored.
   const headerRow = (XLSX.utils.sheet_to_json(ws, {
     header: 1,
     raw: false,
     defval: "",
+    dateNF: "M/D/YYYY",
   }) as unknown[][])[0] as unknown[] | undefined;
 
   const rawHeaders = (headerRow ?? [])
@@ -150,6 +157,7 @@ export function parseExcelBytes(
   const dataRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
     raw: false,
     defval: "",
+    dateNF: "M/D/YYYY",
   });
 
   const rows: Row[] = dataRows.map((r) =>
@@ -197,8 +205,17 @@ function detectSheetsFromWorkbook(
     // sheet_to_json includes the data rows but not the header row when
     // header:undefined (default object-mode). For consistency we report
     // the data-row count (matches the "87 rows" copy the UI shows).
+    // raw:false + dateNF kept consistent with the parse calls above —
+    // doesn't affect the count, but stops SheetJS materialising Date
+    // objects we'd never read.
     const rowCount = ws
-      ? (XLSX.utils.sheet_to_json(ws, { defval: "" }) as unknown[]).length
+      ? (
+          XLSX.utils.sheet_to_json(ws, {
+            raw: false,
+            defval: "",
+            dateNF: "M/D/YYYY",
+          }) as unknown[]
+        ).length
       : 0;
     return {
       name,
