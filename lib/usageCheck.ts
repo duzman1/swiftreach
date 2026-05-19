@@ -5,6 +5,14 @@
 import { prisma } from "./prisma";
 import { getPlanLimits, type PlanLimits } from "./stripe";
 
+// Plans that grant full send access regardless of the Stripe subscription
+// status field. The trade-off: a paid user whose card just declined (status
+// "past_due") keeps sending until the Stripe webhook downgrades their plan
+// — preferable to false-positive lock-outs during card retry windows or
+// after Clerk dev→prod migrations that leave the user row with a paid
+// `plan` value but no `stripeSubscriptionStatus` linked.
+const PAID_PLANS = ["starter", "growth", "pro"] as const;
+
 export interface AllowedResult {
   allowed: true;
   limit: number;
@@ -45,17 +53,26 @@ export async function checkMessageLimit(
     return { allowed: false, reason: "User not found" };
   }
 
-  // Paid plans require an active subscription. "trialing" counts as active
-  // — Stripe considers it healthy. "past_due" / "canceled" / "unpaid" don't.
-  if (
-    user.plan !== "free" &&
-    user.stripeSubscriptionStatus !== "active" &&
-    user.stripeSubscriptionStatus !== "trialing"
-  ) {
+  // Allow sends if EITHER the plan field is one of the paid tiers, OR the
+  // Stripe subscription status is active/trialing. Only block when neither
+  // is true — i.e. the user is genuinely free with no live subscription.
+  //
+  // Why so permissive: switching Clerk dev→prod, or any other path that
+  // creates a fresh User row before the Stripe webhook fires, can leave
+  // `plan="growth"` paired with `stripeSubscriptionStatus=null`. The old
+  // check 403'd those users mid-campaign. The webhook is the source of
+  // truth for downgrades — if a card declines and Stripe cancels the sub,
+  // the webhook flips `plan` back to "free" and this gate fires again.
+  const isPaidPlan = (PAID_PLANS as readonly string[]).includes(user.plan);
+  const isActiveSubscription =
+    user.stripeSubscriptionStatus === "active" ||
+    user.stripeSubscriptionStatus === "trialing";
+
+  if (!isPaidPlan && !isActiveSubscription) {
     return {
       allowed: false,
       reason:
-        "Your subscription is not active. Please update your billing to keep sending.",
+        "This feature requires a paid plan. Upgrade at swiftreach.app/billing",
       upgradeRequired: true,
     };
   }
