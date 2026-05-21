@@ -328,19 +328,65 @@ export async function POST(request: NextRequest) {
 
     // Step 5 — send via existing whatsapp.ts helpers (axios under the
     // hood; same retry/error parsing as the campaign send loop).
-    const result = useFreeform
-      ? await sendTextMessage(
-          normalizedPhone,
-          resolveVariables(message, variables),
-          creds
+    //
+    // The raw Meta URL + request body + error response are logged
+    // inside lib/whatsapp.ts (tagged "META API PAYLOAD:" and
+    // "META API ERROR:") — those show what the wire actually carries.
+    // The TEMPLATE DEBUG block below is the route-side view: what
+    // variables the webhook received and how they were converted to
+    // template components before we handed off to sendTemplateMessage.
+    let result;
+    if (useFreeform) {
+      result = await sendTextMessage(
+        normalizedPhone,
+        resolveVariables(message, variables),
+        creds
+      );
+    } else {
+      const components = buildTemplateComponentsFromVariables(variables);
+      // eslint-disable-next-line no-console
+      console.log(
+        "TEMPLATE DEBUG:",
+        JSON.stringify(
+          {
+            templateName: template,
+            language,
+            rawVariables: variables,
+            builtComponents: components,
+            componentCount: components.length,
+            normalizedPhone,
+          },
+          null,
+          2
         )
-      : await sendTemplateMessage(
-          normalizedPhone,
-          template,
-          language,
-          buildTemplateComponentsFromVariables(variables),
-          creds
-        );
+      );
+      result = await sendTemplateMessage(
+        normalizedPhone,
+        template,
+        language,
+        components,
+        creds
+      );
+    }
+
+    // Route-layer view of what sendTemplateMessage / sendTextMessage
+    // returned. For the underlying HTTP response from Meta, grep
+    // Vercel logs for "META API PAYLOAD:" / "META API ERROR:".
+    // eslint-disable-next-line no-console
+    console.log(
+      "WEBHOOK SEND RESULT:",
+      JSON.stringify(
+        {
+          success: result.success,
+          messageId: result.messageId ?? null,
+          errorCode: result.error?.code ?? null,
+          errorHttpStatus: result.error?.httpStatus ?? null,
+          errorMessage: result.error?.message ?? null,
+        },
+        null,
+        2
+      )
+    );
 
     if (!result.success) {
       const errMsg = translateMetaError(result.error);
