@@ -133,8 +133,10 @@ async function writeLog(params: {
         apiKeyId: params.apiKeyId,
         userId: params.userId,
         phoneNumber: String(params.body?.phone ?? "unknown"),
-        messageType: params.body?.template ? "template" : "freeform",
-        templateName: params.body?.template ?? null,
+        // Trim-check so a whitespace-only template field doesn't get
+        // logged as "template" when we actually sent freeform.
+        messageType: params.body?.template?.trim() ? "template" : "freeform",
+        templateName: params.body?.template?.trim() ? params.body.template : null,
         variables: params.body?.variables
           ? JSON.stringify(params.body.variables)
           : null,
@@ -251,7 +253,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!message && !template) {
+    // Mode selection. Template takes priority when both are present —
+    // Zapier test/sample data often populates `message` with placeholder
+    // text ("Free text, can be multiline"), so a workflow set up to send
+    // a template should still send the template, not the placeholder.
+    // Whitespace-only values don't count.
+    const useTemplate = template.trim().length > 0;
+    const useFreeform = !useTemplate && message.trim().length > 0;
+
+    if (!useTemplate && !useFreeform) {
       return errorResponse(
         'Either "message" or "template" is required.',
         400,
@@ -318,7 +328,7 @@ export async function POST(request: NextRequest) {
 
     // Step 5 — send via existing whatsapp.ts helpers (axios under the
     // hood; same retry/error parsing as the campaign send loop).
-    const result = message
+    const result = useFreeform
       ? await sendTextMessage(
           normalizedPhone,
           resolveVariables(message, variables),
@@ -368,7 +378,7 @@ export async function POST(request: NextRequest) {
         success: true,
         message_id: result.messageId,
         phone: normalizedPhone,
-        type: message ? "freeform" : "template",
+        type: useTemplate ? "template" : "freeform",
         rate_limit: {
           limit: rl.limit,
           remaining: Math.max(0, rl.remaining - 1),
