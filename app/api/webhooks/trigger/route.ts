@@ -37,7 +37,9 @@ interface TriggerBody {
   phone?: string;
   message?: string;
   template?: string;
-  variables?: Record<string, string>;
+  // Object form is preferred; string form is accepted because Zapier
+  // (and some no-code platforms) serialize nested JSON to a string.
+  variables?: Record<string, unknown> | string;
   language?: string;
   api_key?: string;
 }
@@ -75,6 +77,52 @@ function errorResponse(
     },
     { status, headers }
   );
+}
+
+// Accept either a JSON object or a JSON-encoded string for `variables`
+// and return a flat `Record<string, string>`. All values are coerced
+// to strings — Meta template body parameters are text-only, and a
+// numeric variable (e.g. `{"1": 100}`) would otherwise be passed
+// through as a number and reject downstream. Arrays and `null` are
+// rejected and reported via console.warn; the caller falls back to {}.
+function coerceVariables(input: unknown): Record<string, string> {
+  if (input == null) return {};
+
+  let value: unknown = input;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return {};
+    try {
+      value = JSON.parse(trimmed);
+    } catch {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[webhook trigger] Could not parse variables as JSON:",
+        trimmed
+      );
+      return {};
+    }
+  }
+
+  if (
+    value == null ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[webhook trigger] variables did not resolve to a plain object:",
+      value
+    );
+    return {};
+  }
+
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = v == null ? "" : String(v);
+  }
+  return out;
 }
 
 // {{name}} → variables.name. Unknown placeholders pass through unchanged
@@ -222,9 +270,15 @@ export async function POST(request: NextRequest) {
     const phoneRaw = typeof body.phone === "string" ? body.phone : "";
     const message = typeof body.message === "string" ? body.message : "";
     const template = typeof body.template === "string" ? body.template : "";
-    const variables = (body.variables && typeof body.variables === "object"
-      ? body.variables
-      : {}) as Record<string, string>;
+    // Variables can arrive as either a real JSON object (preferred,
+    // /developers docs example) OR a JSON-encoded string (Zapier and
+    // a few other no-code platforms serialize nested objects this
+    // way). Accept both, coerce values to strings since Meta template
+    // body parameters MUST be text. Anything that doesn't resolve to
+    // a plain object becomes {} with a warning — the request still
+    // proceeds, and the user will see unresolved {{placeholders}} in
+    // the delivered message rather than a silent send.
+    const variables = coerceVariables(body.variables);
     const language =
       typeof body.language === "string" && body.language.trim()
         ? body.language.trim()
