@@ -263,6 +263,8 @@ export default function DevelopersPage() {
             <Link href="/privacy" className="hover:text-zinc-900">Privacy</Link>
             <span className="text-zinc-300">·</span>
             <Link href="/terms" className="hover:text-zinc-900">Terms</Link>
+            <span className="text-zinc-300">·</span>
+            <Link href="/data-deletion" className="hover:text-zinc-900">Data Deletion</Link>
           </nav>
         </footer>
       </main>

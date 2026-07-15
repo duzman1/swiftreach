@@ -129,6 +129,10 @@ export function LegalPage({
             <Link href="/terms" className="hover:text-zinc-900 transition-colors">
               Terms
             </Link>
+            <span className="text-zinc-300">·</span>
+            <Link href="/data-deletion" className="hover:text-zinc-900 transition-colors">
+              Data Deletion
+            </Link>
           </nav>
         </div>
       </footer>

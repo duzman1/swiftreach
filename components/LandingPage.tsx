@@ -98,6 +98,10 @@ export function LandingPage() {
             <Link href="/terms" className="hover:text-foreground transition-colors">
               Terms of Service
             </Link>
+            <span className="text-zinc-300">·</span>
+            <Link href="/data-deletion" className="hover:text-foreground transition-colors">
+              Data Deletion
+            </Link>
           </nav>
         </div>
       </footer>
