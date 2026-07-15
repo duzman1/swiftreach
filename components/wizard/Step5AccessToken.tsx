@@ -21,8 +21,12 @@ interface Props {
 
 function describeError(raw: string): string | null {
   if (!raw) return "Access token is required.";
-  if (!raw.startsWith("EAAR")) {
-    return "Access tokens start with EAAR. Double-check you copied the full token.";
+  // Meta tokens start with "EAA" followed by an app-specific character
+  // (K, R, G, B, J, C, D, F, H, ...). Only check the "EAA" prefix; the
+  // 4th char varies by app + generation time, and hardcoding one value
+  // rejects perfectly valid tokens from other Meta apps.
+  if (!raw.startsWith("EAA")) {
+    return "Access tokens start with EAA. Double-check you copied the full token.";
   }
   if (raw.length < 50) {
     return "Access tokens are very long. Double-check you copied the whole token.";
@@ -40,6 +44,16 @@ export function Step5AccessToken({ alreadySaved, onBack, onNext }: Props) {
   const canSubmit = !describeError(token.trim());
 
   async function saveAndContinue() {
+    // If the user already has a token on file AND they didn't type a
+    // new one, just advance — no need to force a re-paste. Without
+    // this short-circuit, the on-screen "already saved" message says
+    // Save & Continue keeps the existing token, but the handler still
+    // fails validation on the empty input and quietly bails.
+    if (alreadySaved && !token.trim()) {
+      await onNext();
+      return;
+    }
+
     setTouched(true);
     if (!canSubmit) return;
 
@@ -149,7 +163,7 @@ export function Step5AccessToken({ alreadySaved, onBack, onNext }: Props) {
             type={reveal ? "text" : "password"}
             autoComplete="off"
             spellCheck={false}
-            placeholder="EAAR..."
+            placeholder="EAA..."
             value={token}
             onChange={(e) => {
               setToken(e.target.value);

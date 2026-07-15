@@ -186,7 +186,7 @@ export function WhatsAppCredentialsForm() {
             <Input
               id="api-token"
               type="password"
-              placeholder="EAARZADV..."
+              placeholder="EAA..."
               value={apiToken}
               onChange={(e) => setApiToken(e.target.value)}
               className="font-mono text-xs"
