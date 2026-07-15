@@ -23,6 +23,7 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   "/terms",                     // Public legal page — Google OAuth requires it
   "/privacy",                   // Public legal page — Google OAuth requires it
+  "/data-deletion",             // Public legal page — Meta App Review requires it
   "/developers",                // Public API documentation
   "/api/webhook(.*)",           // Meta WhatsApp webhook (incl. /api/webhook/[userId])
   "/api/webhooks/(.*)",         // Developer-facing webhook API (auth via API key)
