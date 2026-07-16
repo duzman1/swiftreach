@@ -125,8 +125,12 @@ export function EmbeddedSignup({ onSuccess, onError }: EmbeddedSignupProps) {
     window.addEventListener("message", sessionInfoListener);
 
     window.FB.login(
+      // Meta's SDK rejects `async` callbacks with the runtime error
+      // "Expression is of type asyncfunction, not function". Keep the
+      // callback synchronous and run the fetch work inside a
+      // fire-and-forget IIFE.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      async (response: any) => {
+      (response: any) => {
         window.removeEventListener("message", sessionInfoListener);
 
         // User closed the popup without consenting.
@@ -136,39 +140,41 @@ export function EmbeddedSignup({ onSuccess, onError }: EmbeddedSignupProps) {
         }
 
         setState("processing");
-        try {
-          const r = await fetch("/api/whatsapp/embedded-signup", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              code: response.authResponse.code,
-              phoneNumberId: window._phoneNumberId,
-              wabaId: window._wabaId,
-            }),
-          });
-          const json = await r.json();
-          // apiResponse uses { ok: true, data: ... } shape — be liberal
-          // about which one we see (top-level vs nested under .data).
-          const data = json?.data ?? json;
-          if (r.ok && (json?.ok || json?.success)) {
-            setState("success");
-            onSuccess?.({
-              phoneNumberId: data.phoneNumberId,
-              wabaId: data.wabaId,
-              phoneNumber: data.phoneNumber,
-              verifiedName: data.verifiedName,
-              webhookSubscribed: data.webhookSubscribed,
+        void (async () => {
+          try {
+            const r = await fetch("/api/whatsapp/embedded-signup", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                code: response.authResponse.code,
+                phoneNumberId: window._phoneNumberId,
+                wabaId: window._wabaId,
+              }),
             });
-          } else {
-            throw new Error(json?.error ?? "Connection failed");
+            const json = await r.json();
+            // apiResponse uses { ok: true, data: ... } shape — be liberal
+            // about which one we see (top-level vs nested under .data).
+            const data = json?.data ?? json;
+            if (r.ok && (json?.ok || json?.success)) {
+              setState("success");
+              onSuccess?.({
+                phoneNumberId: data.phoneNumberId,
+                wabaId: data.wabaId,
+                phoneNumber: data.phoneNumber,
+                verifiedName: data.verifiedName,
+                webhookSubscribed: data.webhookSubscribed,
+              });
+            } else {
+              throw new Error(json?.error ?? "Connection failed");
+            }
+          } catch (err) {
+            const raw = err instanceof Error ? err.message : "Unknown error";
+            const translated = translateMetaError(raw);
+            setErrorMessage(translated);
+            setState("error");
+            onError?.(raw);
           }
-        } catch (err) {
-          const raw = err instanceof Error ? err.message : "Unknown error";
-          const translated = translateMetaError(raw);
-          setErrorMessage(translated);
-          setState("error");
-          onError?.(raw);
-        }
+        })();
       },
       {
         config_id: CONFIG_ID,
