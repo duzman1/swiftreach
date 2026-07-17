@@ -13,6 +13,7 @@ import {
   History,
   BarChart3,
   FileText,
+  MessageSquare,
   Settings,
   CreditCard,
   Lock,
@@ -50,6 +51,7 @@ const SECTIONS: { items: NavItem[] }[] = [
       { href: "/campaigns", label: "Campaigns", icon: History },
       { href: "/analytics", label: "Analytics", icon: BarChart3, paidOnly: true },
       { href: "/templates", label: "Templates", icon: FileText },
+      { href: "/whatsapp-templates", label: "WhatsApp Templates", icon: MessageSquare },
     ],
   },
   {
