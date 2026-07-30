@@ -19,6 +19,8 @@ import {
   Lock,
   LifeBuoy,
   Code2,
+  Menu,
+  X,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -120,7 +122,11 @@ function useBillingStatus(): BillingStatus | null {
   return status;
 }
 
-export function Navbar() {
+// Shared nav body used by both the desktop sidebar and the mobile drawer.
+// Handles active-link highlighting, paid-only lock icons, and the inbox
+// badge. When `onNavigate` is supplied (mobile drawer), tapping any link
+// closes the drawer.
+function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const billing = useBillingStatus();
   const paid = isPaid(billing?.plan ?? null);
@@ -145,18 +151,7 @@ export function Navbar() {
   }, [pathname]);
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col bg-zinc-900 text-zinc-100 min-h-screen p-4">
-      <div className="flex items-center px-2 py-4 mb-4">
-        <Image
-          src="/logo.png"
-          alt="SwiftReach"
-          width={140}
-          height={40}
-          className="object-contain"
-          priority
-        />
-      </div>
-
+    <>
       <nav className="flex flex-col gap-1 flex-1">
         {SECTIONS.map((section, idx) => (
           <React.Fragment key={idx}>
@@ -168,6 +163,7 @@ export function Navbar() {
                 active={item.href === activeHref}
                 paid={paid}
                 inboxCount={inboxCount}
+                onNavigate={onNavigate}
               />
             ))}
           </React.Fragment>
@@ -190,6 +186,24 @@ export function Navbar() {
           <PlanBadge />
         </div>
       </div>
+    </>
+  );
+}
+
+export function Navbar() {
+  return (
+    <aside className="hidden md:flex w-64 shrink-0 flex-col bg-zinc-900 text-zinc-100 min-h-screen p-4">
+      <div className="flex items-center px-2 py-4 mb-4">
+        <Image
+          src="/logo.png"
+          alt="SwiftReach"
+          width={140}
+          height={40}
+          className="object-contain"
+          priority
+        />
+      </div>
+      <NavContent />
     </aside>
   );
 }
@@ -199,17 +213,20 @@ function NavLink({
   active,
   paid,
   inboxCount,
+  onNavigate,
 }: {
   item: NavItem;
   active: boolean;
   paid: boolean;
   inboxCount: number;
+  onNavigate?: () => void;
 }) {
   const Icon = item.icon;
   const locked = item.paidOnly && !paid;
   return (
     <Link
       href={item.href}
+      onClick={onNavigate}
       className={cn(
         "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors group",
         active
@@ -236,15 +253,82 @@ function NavLink({
 }
 
 export function MobileTopbar() {
+  const [open, setOpen] = React.useState(false);
+
+  // Lock body scroll while the drawer is open so the page underneath
+  // doesn't jitter when the user swipes.
+  React.useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  // Close on Escape (keyboard users, browser back-gesture, etc.)
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   return (
-    <div className="md:hidden flex items-center bg-zinc-900 text-zinc-100 p-3">
-      <Image
-        src="/logo.png"
-        alt="SwiftReach"
-        width={120}
-        height={34}
-        className="object-contain"
-      />
-    </div>
+    <>
+      <div className="md:hidden flex items-center justify-between bg-zinc-900 text-zinc-100 p-3">
+        <Image
+          src="/logo.png"
+          alt="SwiftReach"
+          width={120}
+          height={34}
+          className="object-contain"
+        />
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open navigation menu"
+          className="p-2 rounded-md hover:bg-zinc-800 active:bg-zinc-700"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+      </div>
+
+      {open && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          {/* Drawer panel — tap-through to nav items closes the drawer
+              via NavContent's onNavigate callback. */}
+          <aside className="w-72 max-w-[85vw] bg-zinc-900 text-zinc-100 p-4 flex flex-col overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <Image
+                src="/logo.png"
+                alt="SwiftReach"
+                width={120}
+                height={34}
+                className="object-contain"
+              />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Close navigation menu"
+                className="p-2 rounded-md hover:bg-zinc-800 active:bg-zinc-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <NavContent onNavigate={() => setOpen(false)} />
+          </aside>
+          {/* Backdrop — tap to dismiss. */}
+          <button
+            type="button"
+            className="flex-1 bg-black/50"
+            aria-label="Close navigation menu"
+            onClick={() => setOpen(false)}
+          />
+        </div>
+      )}
+    </>
   );
 }
