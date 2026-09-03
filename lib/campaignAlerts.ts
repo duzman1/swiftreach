@@ -44,7 +44,14 @@ export async function runCampaignAlerts(
       include: {
         user: { select: { id: true, email: true } },
         contacts: {
-          select: { status: true, phoneNumber: true, errorMessage: true },
+          select: {
+            status: true,
+            phoneNumber: true,
+            errorMessage: true,
+            sentAt: true,
+            deliveredAt: true,
+            readAt: true,
+          },
         },
       },
     });
@@ -59,9 +66,20 @@ export async function runCampaignAlerts(
     }
 
     // ── Gather stats ──────────────────────────────────────
+    // Count deliveries / reads from TIMESTAMPS, not statuses.
+    // Meta's status webhook doesn't always advance the row's status
+    // string from "sent" → "delivered" → "read" cleanly — sometimes
+    // status stays at "sent" while deliveredAt/readAt get populated
+    // by a later webhook. Status-based counting reports the row as
+    // still "sent" when it's actually been delivered. Timestamp-based
+    // counting is a strict superset and matches reality.
     const contacts = campaign.contacts;
-    const sentStatuses = new Set(["sent", "delivered", "read", "failed"]);
-    const deliveredStatuses = new Set(["delivered", "read"]);
+    const attemptedStatuses = new Set([
+      "sent",
+      "delivered",
+      "read",
+      "failed",
+    ]);
     const skippedStatuses = new Set(["skipped", "invalid", "cancelled"]);
 
     // Count opt-outs from OptOutLog — captures both send-time skips
@@ -84,10 +102,12 @@ export async function runCampaignAlerts(
 
     const stats: CampaignStats = {
       totalCount: contacts.length,
-      sentCount: contacts.filter((c) => sentStatuses.has(c.status)).length,
-      deliveredCount: contacts.filter((c) => deliveredStatuses.has(c.status))
+      sentCount: contacts.filter((c) => attemptedStatuses.has(c.status))
         .length,
-      readCount: contacts.filter((c) => c.status === "read").length,
+      // Delivered/read are the ground-truth timestamps set by Meta's
+      // status webhooks. See comment above.
+      deliveredCount: contacts.filter((c) => c.deliveredAt !== null).length,
+      readCount: contacts.filter((c) => c.readAt !== null).length,
       failedCount: contacts.filter((c) => c.status === "failed").length,
       skippedCount: contacts.filter((c) => skippedStatuses.has(c.status))
         .length,

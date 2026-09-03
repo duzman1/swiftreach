@@ -45,10 +45,15 @@ export default async function CampaignDetailPage({
   if (!campaign) notFound();
 
   const contacts = campaign.contacts;
+  // Count delivered/read from TIMESTAMPS, not from `status`. Meta's
+  // status webhook can set deliveredAt/readAt without advancing the
+  // row's status string past "sent" — status-based counting under-
+  // reports true delivery. Timestamp-based counting is a superset
+  // and matches what the per-contact table shows.
   const counts = {
     sent: contacts.filter((c) => ["sent", "delivered", "read"].includes(c.status)).length,
-    delivered: contacts.filter((c) => ["delivered", "read"].includes(c.status)).length,
-    read: contacts.filter((c) => c.status === "read").length,
+    delivered: contacts.filter((c) => c.deliveredAt !== null).length,
+    read: contacts.filter((c) => c.readAt !== null).length,
     failed: contacts.filter((c) => c.status === "failed").length,
     skipped: contacts.filter((c) => ["skipped", "invalid", "cancelled"].includes(c.status)).length,
   };
