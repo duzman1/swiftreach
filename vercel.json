@@ -10,6 +10,9 @@
     "app/api/cron/send-scheduled/route.ts": {
       "maxDuration": 300
     },
+    "app/api/cron/cleanup-stuck-campaigns/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/drive/import/route.ts": {
       "maxDuration": 60
     },
@@ -21,6 +24,10 @@
     {
       "path": "/api/cron/send-scheduled",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-stuck-campaigns",
+      "schedule": "0 * * * *"
     }
   ]
 }
