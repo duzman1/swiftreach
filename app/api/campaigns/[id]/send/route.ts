@@ -13,6 +13,7 @@ import { requireUserId } from "@/lib/auth";
 import { decrypt } from "@/lib/encrypt";
 import { checkMessageLimit, incrementMessageUsage } from "@/lib/usageCheck";
 import { logError } from "@/lib/errorLog";
+import { runCampaignAlerts } from "@/lib/campaignAlerts";
 
 export const dynamic = "force-dynamic";
 // Vercel Hobby plan caps function maxDuration at 300s. If you upgrade to Pro,
@@ -379,6 +380,21 @@ export async function GET(
           });
         } catch {
           /* ignore */
+        }
+
+        // Post-campaign alert engine — only runs on "completed"
+        // transitions (not on paused/cancelled/failed) so we don't
+        // fire analyses on non-terminal states. Direct in-process
+        // call (not HTTP): more reliable than fire-and-forget fetch
+        // in Vercel serverless where the function can die before
+        // the request lands. Errors are logged inside runCampaignAlerts
+        // — we don't await the result here so the SSE close isn't
+        // delayed by the email round-trips.
+        if (status === "completed") {
+          runCampaignAlerts(campaignId).catch((err) => {
+            // eslint-disable-next-line no-console
+            console.error("Post-campaign alert engine failed:", err);
+          });
         }
       }
     },

@@ -17,7 +17,10 @@ async function loadCampaign(id: string, userId: string) {
   try {
     const campaign = await prisma.campaign.findUnique({
       where: { id },
-      include: { contacts: { orderBy: { id: "asc" } } },
+      include: {
+        contacts: { orderBy: { id: "asc" } },
+        alerts: { orderBy: { createdAt: "asc" } },
+      },
     });
     // Ownership check — refuse to load campaigns belonging to other users.
     if (!campaign || campaign.userId !== userId) return null;
@@ -118,6 +121,47 @@ export default async function CampaignDetailPage({
           },
         ]}
       />
+
+      {campaign.alerts && campaign.alerts.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-zinc-700 uppercase tracking-wide">
+            Performance Insights
+          </h3>
+          {campaign.alerts.map((alert) => {
+            const border =
+              alert.type === "success"
+                ? "border-emerald-500 bg-emerald-50"
+                : alert.type === "critical"
+                  ? "border-red-500 bg-red-50"
+                  : alert.type === "warning"
+                    ? "border-amber-500 bg-amber-50"
+                    : "border-sky-500 bg-sky-50";
+            return (
+              <div
+                key={alert.id}
+                className={`p-4 rounded-lg border-l-4 ${border}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-semibold text-sm text-zinc-900">
+                    {alert.title}
+                  </p>
+                  {alert.metric && (
+                    <span className="shrink-0 text-xs font-mono px-2 py-0.5 rounded-full bg-white/60 border border-zinc-200 text-zinc-700">
+                      {alert.metric}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-zinc-700 mt-1">{alert.message}</p>
+                {alert.recommendation && (
+                  <p className="text-xs text-zinc-600 mt-2 italic">
+                    💡 {alert.recommendation}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {campaign.rawMessage && (
         <Card>

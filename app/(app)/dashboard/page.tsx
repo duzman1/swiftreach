@@ -7,6 +7,7 @@ import { StatsBar } from "@/components/shared/StatsBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConnectionBanner } from "@/components/shared/ConnectionBanner";
 import { SetupWizardBanner } from "@/components/shared/SetupWizardBanner";
+import { UnreadAlertsBanner } from "@/components/shared/UnreadAlertsBanner";
 import { Send, FileText, Settings, MessageCircle, MessageSquare } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
@@ -105,6 +106,8 @@ async function renderDashboard() {
       ) : (
         <ConnectionBanner show={!whatsappConnected} />
       )}
+
+      <UnreadAlertsBanner />
 
       <UsageMeter
         plan={plan}

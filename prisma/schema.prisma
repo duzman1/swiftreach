@@ -98,6 +98,7 @@ model User {
   outboundReplies    OutboundReply[]
   supportRequests    SupportRequest[]
   apiKeys            ApiKey[]
+  campaignAlerts     CampaignAlert[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -128,6 +129,11 @@ model Campaign {
   createdAt    DateTime  @default(now())
   completedAt  DateTime?
   contacts     Contact[]
+
+  // Post-campaign analysis: set when the alert engine has run for
+  // this campaign. Idempotency guard — analysis runs at most once.
+  alertsSentAt DateTime?
+  alerts       CampaignAlert[]
 
   @@index([userId])
 }
@@ -423,4 +429,27 @@ model OutboundReply {
 
   @@index([userId])
   @@index([inboundMessageId])
+}
+
+// Post-campaign performance insights. Created by the alert engine
+// (lib/campaignAlerts.ts) exactly once per campaign, after the send
+// loop completes. Surfaces on the campaign detail page and the
+// dashboard unread-alerts banner, plus a copy is emailed to the user.
+model CampaignAlert {
+  id             String   @id @default(cuid())
+  campaignId     String
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String   // success | warning | critical | info
+  category       String   // delivery | engagement | optout | compliance | general
+  title          String
+  message        String
+  recommendation String?
+  metric         String?  // e.g. "82%" or "9 failed"
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([campaignId])
 }
