@@ -135,6 +135,18 @@ model Campaign {
   alertsSentAt DateTime?
   alerts       CampaignAlert[]
 
+  // Auto-retry engine (lib/retryEngine.ts). autoRetryEnabled defaults
+  // to true — users can opt out per campaign. autoRetryRanAt acts as
+  // the idempotency guard (cron never retries the same campaign
+  // twice). retriedContactCount and retryDelivered summarize the
+  // outcome of the auto-retry pass so the campaign detail page can
+  // render "N of M delivered on retry" without a live count.
+  autoRetryEnabled     Boolean   @default(true)
+  autoRetryAt          DateTime?
+  autoRetryRanAt       DateTime?
+  retriedContactCount  Int       @default(0)
+  retryDelivered       Int       @default(0)
+
   @@index([userId])
 }
 
@@ -151,6 +163,13 @@ model Contact {
   sentAt              DateTime?
   deliveredAt         DateTime?
   readAt              DateTime?
+
+  // Retry engine (lib/retryEngine.ts). retryCount tracks how many
+  // times THIS specific contact has been retried; retryStatus is the
+  // outcome of the last retry attempt ("sent" | "failed" | null).
+  retryCount          Int       @default(0)
+  lastRetryAt         DateTime?
+  retryStatus         String?
 
   @@index([campaignId])
   @@index([whatsappMsgId])

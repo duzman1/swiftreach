@@ -127,6 +127,41 @@ export default async function CampaignDetailPage({
         ]}
       />
 
+      {campaign.status === "completed" && campaign.failedCount > 0 && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+          {campaign.autoRetryRanAt ? (
+            <p className="text-sm text-sky-800">
+              <span className="font-medium">↻ Auto-retry ran</span> at{" "}
+              {new Date(campaign.autoRetryRanAt).toLocaleString()} —{" "}
+              <strong>{campaign.retryDelivered}</strong> of{" "}
+              <strong>{campaign.retriedContactCount}</strong> delivered on retry.
+              {campaign.failedCount > 0 && (
+                <>
+                  {" "}
+                  <span className="text-sky-700">
+                    {campaign.failedCount} still failed — most likely not on
+                    WhatsApp.
+                  </span>
+                </>
+              )}
+            </p>
+          ) : campaign.autoRetryEnabled ? (
+            <p className="text-sm text-sky-800">
+              <span className="font-medium">↻ Auto-retry scheduled</span> —
+              SwiftReach will automatically retry {campaign.failedCount} failed
+              message{campaign.failedCount === 1 ? "" : "s"} within the hour.
+              You can also click <strong>Retry failed</strong> above to trigger
+              it now.
+            </p>
+          ) : (
+            <p className="text-sm text-sky-800">
+              Auto-retry is disabled for this campaign. Click{" "}
+              <strong>Retry failed</strong> above to retry manually.
+            </p>
+          )}
+        </div>
+      )}
+
       {campaign.alerts && campaign.alerts.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-zinc-700 uppercase tracking-wide">
@@ -234,7 +269,21 @@ export default async function CampaignDetailPage({
                         </td>
                         <td className="p-2 font-mono text-xs">{c.phoneNumber}</td>
                         <td className="p-2">
-                          <StatusBadge status={c.status} />
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge status={c.status} />
+                            {c.retryCount > 0 && (
+                              <span
+                                className="text-[10px] text-zinc-500"
+                                title={
+                                  c.lastRetryAt
+                                    ? `Last retry: ${new Date(c.lastRetryAt).toLocaleString()}`
+                                    : "Retried"
+                                }
+                              >
+                                (retried {c.retryCount}×)
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-2 text-xs text-muted-foreground">
                           {c.sentAt ? new Date(c.sentAt).toLocaleTimeString() : "—"}
