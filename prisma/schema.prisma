@@ -95,6 +95,16 @@ model User {
   // Toggled from /admin/users/[id]/suspend.
   suspended Boolean @default(false)
 
+  // ── White-label branding (Pro only, gated by whiteLabelReports) ────────
+  // Fields drive the PDF report header + footer. Editable on Pro only,
+  // but readable on every plan (so the Branding settings page can show
+  // a locked preview). See app/api/branding/route.ts for the plan gate.
+  companyName             String?  // defaults from firstName+lastName when blank
+  logoUrl                 String?  // Vercel Blob URL; nulled when removed
+  accentColor             String   @default("#25D366")
+  footerText              String?  // free-form single line for agency contact
+  hideSwiftReachBranding  Boolean  @default(false)
+
   campaigns          Campaign[]
   templates          MessageTemplate[]
   scheduledCampaigns ScheduledCampaign[]
@@ -106,6 +116,7 @@ model User {
   apiKeys            ApiKey[]
   campaignAlerts     CampaignAlert[]
   automations        Automation[]
+  reportGenerations  ReportGeneration[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -581,4 +592,18 @@ model AutomationRun {
 
   @@index([automationId, runDate])
   @@index([userId])
+}
+
+// One row per PDF report generation. Used only for per-account rate
+// limiting (20/hour) so a loop can't exhaust the function budget.
+// Rows are read by count-in-window; they can be pruned by a future
+// cron if the table grows large — not needed at Pro-only volumes.
+model ReportGeneration {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String   // "campaign" | "range"
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
