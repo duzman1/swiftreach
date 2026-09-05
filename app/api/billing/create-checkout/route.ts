@@ -70,6 +70,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Logged assertion for QA — proves the priceId Stripe sees
+    // matches the interval the user selected. If the user picks
+    // Annual and this log shows an ENV slot containing MONTHLY, the
+    // toggle wiring is broken. Also useful for debugging env
+    // configuration drift between environments.
+    const envSlot =
+      interval === "year"
+        ? `STRIPE_${planId.toUpperCase()}_ANNUAL_PRICE_ID`
+        : `STRIPE_${planId.toUpperCase()}_MONTHLY_PRICE_ID`;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[billing.checkout] plan=${planId} interval=${interval} priceId=${priceId.substring(0, 15)}… (from ${envSlot})`
+    );
+
     const stripe = getStripe();
     const customerId = await getOrCreateCustomer(user);
 

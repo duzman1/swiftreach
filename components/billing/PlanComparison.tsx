@@ -10,7 +10,14 @@ import { Loader2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { PlanId, BillingInterval, Plan, FeatureKey } from "@/lib/plans";
+import {
+  getPreviousPlan,
+  getLimit,
+  type PlanId,
+  type BillingInterval,
+  type Plan,
+  type FeatureKey,
+} from "@/lib/plans";
 
 interface Props {
   currentPlan: PlanId;
@@ -180,86 +187,34 @@ export function PlanComparison({
                 )}
               </div>
 
-              {/* Differentiator or headline features */}
-              {p.id === "pro" ? (
-                <ul className="mt-4 space-y-2 text-sm text-zinc-700 flex-1">
-                  <li className="flex gap-2">
+              {/* Card bullets — same shape for all four cards so users
+                  can compare volume, numbers, and inheritance
+                  consistently. Messages/month and WhatsApp-numbers
+                  come from getLimit() so they never drift from
+                  lib/plans.ts. */}
+              <ul className="mt-4 space-y-2 text-sm text-zinc-700 flex-1">
+                {renderBullets(p).map((line, i) => (
+                  <li key={i} className="flex gap-2">
                     <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>White-label reports</span>
+                    <span>{line}</span>
                   </li>
-                  <li className="flex gap-2">
-                    <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>Client workspaces</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>1-hour custom onboarding call</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>4-hour support SLA + dedicated success manager</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>Everything in Growth</span>
-                  </li>
-                </ul>
-              ) : (
-                <ul className="mt-4 space-y-2 text-sm text-zinc-700 flex-1">
-                  <li className="flex gap-2">
-                    <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>
-                      {p.limits.messagesPerMonth.toLocaleString()} messages / month
-                    </span>
-                  </li>
-                  <li className="flex gap-2">
-                    <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>
-                      {p.limits.whatsappNumbers} WhatsApp number
-                      {p.limits.whatsappNumbers === 1 ? "" : "s"}
-                    </span>
-                  </li>
-                  {p.features.scheduledCampaigns && (
-                    <li className="flex gap-2">
-                      <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                      <span>Scheduled campaigns</span>
-                    </li>
-                  )}
-                  {p.features.csvExport && (
-                    <li className="flex gap-2">
-                      <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                      <span>CSV export + Google Drive</span>
-                    </li>
-                  )}
-                  {p.features.fullAnalytics && (
-                    <li className="flex gap-2">
-                      <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                      <span>Full analytics</span>
-                    </li>
-                  )}
-                  {p.features.savedAudiences && (
-                    <li className="flex gap-2">
-                      <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                      <span>Saved audiences</span>
-                    </li>
-                  )}
-                  <li className="flex gap-2">
-                    <Check className="w-4 h-4 text-whatsapp shrink-0 mt-0.5" />
-                    <span>{p.supportSla}</span>
-                  </li>
-                </ul>
-              )}
+                ))}
+              </ul>
 
-              {/* CTA */}
+              {/* CTA — pinned to the bottom of the card via the ul's
+                  flex-1 above + this mt-6. All cards share the same
+                  Button h-10 (or an h-10 spacer div for the "paid user
+                  looking at Free card" case) so bottom edges align. */}
               <div className="mt-6">
                 {isCurrent ? (
                   <Button variant="outline" disabled className="w-full">
                     Current plan
                   </Button>
                 ) : p.id === "free" ? (
-                  <Button variant="outline" disabled className="w-full">
-                    —
-                  </Button>
+                  // Paid user viewing the Free card: no CTA (downgrades
+                  // go through the Stripe billing portal), but preserve
+                  // the vertical space so all cards align.
+                  <div className="h-10" aria-hidden="true" />
                 ) : !priceConfigured ? (
                   <Button variant="outline" disabled className="w-full">
                     Coming soon
@@ -343,6 +298,57 @@ export function PlanComparison({
       )}
     </div>
   );
+}
+
+// Build the bullet list for one plan card. Same shape for all four:
+// messages/month, WhatsApp numbers, "Everything in <previous>" for
+// non-Free tiers, then plan-specific highlights, then support SLA.
+// All values sourced from lib/plans.ts so they can't drift.
+function renderBullets(p: Plan): string[] {
+  const bullets: string[] = [];
+  const messagesLimit = getLimit(p.id, "messagesPerMonth");
+  const numbersLimit = getLimit(p.id, "whatsappNumbers");
+
+  bullets.push(
+    `${(messagesLimit ?? 0).toLocaleString()} messages / month`
+  );
+  bullets.push(
+    `${numbersLimit} WhatsApp number${numbersLimit === 1 ? "" : "s"}`
+  );
+
+  // "Everything in <previous>" — Starter/Growth/Pro only. Free has no
+  // predecessor so getPreviousPlan returns null and we skip.
+  const previous = getPreviousPlan(p.id);
+  if (previous) {
+    bullets.push(`Everything in ${previous.name}`);
+  }
+
+  // Plan-specific highlights. Pro leads with the differentiators the
+  // spec called out (in Pro's case these follow the inheritance line);
+  // lower tiers add whatever features they've enabled.
+  if (p.id === "pro") {
+    bullets.push("White-label reports");
+    bullets.push("Client workspaces");
+    bullets.push("1-hour custom onboarding call");
+  } else {
+    if (p.features.scheduledCampaigns)
+      bullets.push("Scheduled campaigns");
+    if (p.features.csvExport && p.features.googleDriveImport) {
+      bullets.push("CSV export + Google Drive import");
+    } else if (p.features.csvExport) {
+      bullets.push("CSV export");
+    } else if (p.features.googleDriveImport) {
+      bullets.push("Google Drive import");
+    }
+    if (p.features.fullAnalytics) bullets.push("Full analytics");
+    if (p.features.savedAudiences) bullets.push("Saved audiences");
+  }
+
+  // Support SLA closes the list — pulled directly from lib/plans.ts
+  // so FIX 5's edit ("4-hour priority support") flows through here.
+  bullets.push(p.supportSla);
+
+  return bullets;
 }
 
 function renderCell(

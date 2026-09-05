@@ -45,7 +45,6 @@ export async function checkMessageLimit(
     select: {
       plan: true,
       messagesUsedThisMonth: true,
-      stripeSubscriptionStatus: true,
     },
   });
 
@@ -53,22 +52,17 @@ export async function checkMessageLimit(
     return { allowed: false, reason: "User not found" };
   }
 
-  // Allow sends if EITHER the plan field is one of the paid tiers, OR the
-  // Stripe subscription status is active/trialing. Only block when neither
-  // is true — i.e. the user is genuinely free with no live subscription.
+  // Access is decided by the plan field ONLY. Never by
+  // stripeSubscriptionStatus. See lib/plans.ts's CRITICAL BEHAVIOUR
+  // comment. A user with plan="pro" (or any paid tier) set manually
+  // in the DB — comped account, beta user, admin override — with
+  // NO Stripe subscription at all must still get full paid access.
   //
-  // Why so permissive: switching Clerk dev→prod, or any other path that
-  // creates a fresh User row before the Stripe webhook fires, can leave
-  // `plan="growth"` paired with `stripeSubscriptionStatus=null`. The old
-  // check 403'd those users mid-campaign. The webhook is the source of
-  // truth for downgrades — if a card declines and Stripe cancels the sub,
-  // the webhook flips `plan` back to "free" and this gate fires again.
+  // The webhook is the source of truth for downgrades: when a Stripe
+  // subscription ends or a card gives up, the webhook flips plan
+  // back to "free" and this gate fires correctly.
   const isPaidPlan = (PAID_PLANS as readonly string[]).includes(user.plan);
-  const isActiveSubscription =
-    user.stripeSubscriptionStatus === "active" ||
-    user.stripeSubscriptionStatus === "trialing";
-
-  if (!isPaidPlan && !isActiveSubscription) {
+  if (!isPaidPlan) {
     return {
       allowed: false,
       reason:

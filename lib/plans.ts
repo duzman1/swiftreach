@@ -173,7 +173,7 @@ export const PLANS: Record<PlanId, Plan> = {
       clientWorkspaces: true,
       customOnboarding: true,
     },
-    supportSla: "4-hour priority support + dedicated success manager",
+    supportSla: "4-hour priority support",
   },
 };
 
@@ -255,4 +255,14 @@ export function formatInterval(interval: BillingInterval): string {
 /** All plans in display order. */
 export function getAllPlansOrdered(): Plan[] {
   return TIER_ORDER.map((id) => PLANS[id]);
+}
+
+/** Return the plan immediately below the given one in the tier order,
+ *  or null if this is already the lowest tier (free). Used by the
+ *  billing UI to render "Everything in <previous plan>" bullets
+ *  without hardcoding plan names. */
+export function getPreviousPlan(planId: PlanId): Plan | null {
+  const idx = TIER_ORDER.indexOf(planId);
+  if (idx <= 0) return null;
+  return PLANS[TIER_ORDER[idx - 1]];
 }
