@@ -100,9 +100,11 @@ export async function POST(req: NextRequest) {
               : "Billed monthly. Cancel anytime.",
         },
       },
-      payment_method_options: {
-        card: { setup_future_usage: "off_session" },
-      },
+      // Note: no payment_method_options.setup_future_usage here.
+      // In subscription mode Stripe automatically saves the card for
+      // recurring charges; setting it explicitly now returns
+      // "You can not pass `payment_method_options[setup_future_usage]`
+      // in `subscription` mode." from the Stripe API.
     });
 
     if (!session.url) {
