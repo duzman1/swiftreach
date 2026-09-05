@@ -21,9 +21,21 @@ export const dynamic = "force-dynamic";
 
 // Per-user dashboard stats. The `userId` filter is applied to each query so
 // users only see their own campaigns / messages.
+//
+// Every count here is ALL-TIME — Contact rows scoped by the user's
+// campaigns, no date window. Names are suffixed *AllTime to keep them
+// distinct from `user.messagesUsedThisMonth` (the calendar-month
+// counter used for billing enforcement, which legitimately resets to
+// 0 on the 1st of every month).
 async function loadDashboardData(userId: string) {
   try {
-    const [campaigns, totalMessages, sent, delivered, recent] = await Promise.all([
+    const [
+      campaigns,
+      totalContactsAllTime,
+      sentAllTime,
+      deliveredAllTime,
+      recent,
+    ] = await Promise.all([
       prisma.campaign.count({ where: { userId } }),
       prisma.contact.count({ where: { campaign: { userId } } }),
       prisma.contact.count({
@@ -39,13 +51,19 @@ async function loadDashboardData(userId: string) {
       }),
     ]);
 
-    return { campaigns, totalMessages, sent, delivered, recent };
+    return {
+      campaigns,
+      totalContactsAllTime,
+      sentAllTime,
+      deliveredAllTime,
+      recent,
+    };
   } catch {
     return {
       campaigns: 0,
-      totalMessages: 0,
-      sent: 0,
-      delivered: 0,
+      totalContactsAllTime: 0,
+      sentAllTime: 0,
+      deliveredAllTime: 0,
       recent: [] as Awaited<ReturnType<typeof prisma.campaign.findMany>>,
     };
   }
@@ -139,29 +157,36 @@ async function renderDashboard() {
         stats={[
           { label: "Total Campaigns", value: formatNumber(data.campaigns) },
           {
-            // Renamed from "Messages Sent" to remove ambiguity with the
-            // billing page's period counter. This tile counts every
-            // contact this user has ever messaged (Contact rows with a
-            // non-null sentAt) — an audit-trail number, not a billing
-            // number.
+            // All-time count of Contact rows with a non-null sentAt.
+            // Audit-trail number, distinct from displayedUsed below.
             label: "Contacts messaged (all time)",
-            value: formatNumber(data.sent),
+            value: formatNumber(data.sentAllTime),
             accent: "success",
           },
           {
-            // NEW tile: current-calendar-month send count, reads the
-            // same messagesUsedThisMonth counter the billing page and
-            // plan-limit enforcement use — post-roll, so it matches
-            // the usage meter above by construction.
+            // Current calendar-month send count — same
+            // messagesUsedThisMonth counter the billing page and
+            // plan-limit enforcement use, post-roll so it matches
+            // the usage meter above by construction. Resets to 0 on
+            // the 1st of every month.
             label: "Messages sent this period",
             value: formatNumber(displayedUsed),
           },
           {
-            label: "Delivery Rate",
-            value: formatPercent(data.delivered, data.sent),
-            hint: `${formatNumber(data.delivered)} delivered`,
+            // Delivery rate is deliveredAllTime / sentAllTime — both
+            // are ALL-TIME Contact-based counts. Explicitly NOT
+            // divided by messagesUsedThisMonth, which is zero on the
+            // 1st of every month and would produce "—" for every
+            // paying user then. formatPercent renders "—" when the
+            // denominator is zero (new account, no sends yet).
+            label: "Delivery rate (all time)",
+            value: formatPercent(data.deliveredAllTime, data.sentAllTime),
+            hint: `${formatNumber(data.deliveredAllTime)} delivered`,
           },
-          { label: "Total Contacts", value: formatNumber(data.totalMessages) },
+          {
+            label: "Total Contacts",
+            value: formatNumber(data.totalContactsAllTime),
+          },
         ]}
       />
 

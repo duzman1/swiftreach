@@ -53,7 +53,13 @@ export function ymd(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Read-rate as a percentage, safe for zero denominators. */
+/**
+ * Read-rate as a percentage, safe for zero denominators.
+ *
+ * Returns 0 for zero-denominator inputs — analytics API payloads are
+ * numbers, and the UI decides how to render 0 vs "no data" (e.g. the
+ * campaign table shows "—" when `sent === 0`). Never NaN or Infinity.
+ */
 export function pct(numerator: number, denominator: number): number {
   if (!denominator) return 0;
   return Math.round((numerator / denominator) * 1000) / 10; // one decimal
