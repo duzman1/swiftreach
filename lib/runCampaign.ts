@@ -25,9 +25,9 @@ import { logError } from "./errorLog";
 
 interface RunOptions {
   /** Soft cap on wall-clock time in ms. Loop exits cleanly when exceeded
-   * so the function returns before Vercel's 300s hard cap. The campaign
-   * stays in "sending" status; a future cron tick can resume by selecting
-   * still-pending contacts. */
+   * so the function returns before Vercel's hard cap (900s on Pro).
+   * The campaign stays in "sending" status; a future cron tick can
+   * resume by selecting still-pending contacts. */
   maxRuntimeMs?: number;
 }
 
@@ -47,7 +47,7 @@ export async function runCampaignSend(
   opts: RunOptions = {}
 ): Promise<RunResult> {
   const startedAt = Date.now();
-  const maxRuntimeMs = opts.maxRuntimeMs ?? 270_000; // leave ~30s buffer under Vercel 300s.
+  const maxRuntimeMs = opts.maxRuntimeMs ?? 870_000; // leave ~30s buffer under Vercel Pro 900s.
 
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign || campaign.userId !== userId) {

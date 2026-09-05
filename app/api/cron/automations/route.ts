@@ -16,7 +16,9 @@ import { runDailyAutomations } from "@/lib/automationEngine";
 import { logError } from "@/lib/errorLog";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+// 900s (Vercel Pro) — needed for holiday-season days when a single
+// automation might have hundreds of contacts on the same date.
+export const maxDuration = 900;
 
 export async function POST(req: NextRequest) {
   const expected = process.env.CRON_SECRET?.trim();

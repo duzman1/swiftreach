@@ -5,11 +5,11 @@
 // SECURITY: protected by x-cron-secret header. Vercel Cron sends the value
 // of CRON_SECRET; without a match we 401.
 //
-// Time budget: each invocation has 300s. Sending happens sequentially —
-// runCampaignSend has a 270s soft cap so we stay under Vercel's hard
-// limit. Anything not finished within the budget stays in "sending" status
-// and resumes on the next tick (runCampaignSend re-selects pending
-// contacts).
+// Time budget: each invocation has 900s (Vercel Pro). Sending happens
+// sequentially — runCampaignSend has an 870s soft cap so we stay under
+// Vercel's hard limit. Anything not finished within the budget stays in
+// "sending" status and resumes on the next tick (runCampaignSend
+// re-selects pending contacts).
 //
 // Recurrence: after a successful run, computeNextRunAt() sets the next
 // scheduledFor; the row stays as "scheduled" so the cron picks it up
@@ -28,7 +28,7 @@ import { computeNextRunAt } from "@/lib/recurrence";
 import { logError } from "@/lib/errorLog";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 900;
 
 interface RunOutcome {
   scheduledId: string;

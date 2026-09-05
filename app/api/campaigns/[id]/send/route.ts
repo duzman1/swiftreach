@@ -16,11 +16,11 @@ import { logError } from "@/lib/errorLog";
 import { runCampaignAlerts } from "@/lib/campaignAlerts";
 
 export const dynamic = "force-dynamic";
-// Vercel Hobby plan caps function maxDuration at 300s. If you upgrade to Pro,
-// you can raise this to 900s. The send loop checks pause/cancel state on each
-// iteration, so a single SSE pass can deliver ~150 messages at the default 2s
-// delay. For larger campaigns, split into batches via Pause → Resume.
-export const maxDuration = 300;
+// Vercel Pro caps function maxDuration at 900s. The send loop checks
+// pause/cancel state on each iteration, so a single SSE pass can
+// deliver ~450 messages at the default 2s delay. For truly huge
+// campaigns, split into batches via Pause → Resume.
+export const maxDuration = 900;
 
 // Server-Sent Events stream that walks the campaign's pending contacts and
 // sends them one at a time, with the configured delay between sends.

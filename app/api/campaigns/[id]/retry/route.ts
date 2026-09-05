@@ -6,7 +6,7 @@ import { requireUserId, assertOwnership } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 900;
 
 export async function PUT(_req: Request, { params }: { params: { id: string } }) {
   try {

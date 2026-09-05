@@ -1,6 +1,4 @@
-// Vercel Cron entry point — runs daily at 03:00 UTC (Hobby-plan
-// cron minimum interval is daily; on Pro this could be flipped to
-// something more responsive like every 30 minutes). Finds completed
+// Vercel Cron entry point — runs every 30 minutes. Finds completed
 // campaigns that have failed contacts, are opted-in to auto-retry,
 // and have not yet been auto-retried, then runs one pass of the
 // retry engine on each.
@@ -21,7 +19,9 @@ import { retryCampaignFailed } from "@/lib/retryEngine";
 import { logError } from "@/lib/errorLog";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300s (Vercel Pro) — enough headroom for MAX_CAMPAIGNS_PER_TICK × ~20
+// retries × 1s inter-contact delay in worst case.
+export const maxDuration = 300;
 
 // Campaigns become eligible for auto-retry after this cooldown from
 // completion. 30 min is generous — enough time for late Meta delivery

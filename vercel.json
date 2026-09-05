@@ -2,22 +2,22 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "app/api/campaigns/[id]/send/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 900
     },
     "app/api/campaigns/[id]/retry/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 900
     },
     "app/api/cron/send-scheduled/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 900
     },
     "app/api/cron/cleanup-stuck-campaigns/route.ts": {
       "maxDuration": 60
     },
     "app/api/cron/retry-failed/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "app/api/cron/automations/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 900
     },
     "app/api/drive/import/route.ts": {
       "maxDuration": 60
@@ -33,11 +33,11 @@
     },
     {
       "path": "/api/cron/cleanup-stuck-campaigns",
-      "schedule": "0 2 * * *"
+      "schedule": "0 * * * *"
     },
     {
       "path": "/api/cron/retry-failed",
-      "schedule": "0 3 * * *"
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/cron/automations",
