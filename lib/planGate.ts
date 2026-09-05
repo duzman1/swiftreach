@@ -7,6 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "./prisma";
+import { hasFeature, type FeatureKey } from "./plans";
 
 export type PaidFeature =
   | "scheduled_campaigns"
@@ -65,4 +66,40 @@ export async function requirePaidPlan(
  */
 export function isPaidPlan(plan: string | null | undefined): boolean {
   return plan === "starter" || plan === "growth" || plan === "pro";
+}
+
+/**
+ * Feature-level gate that maps directly to the FeatureKey enum in
+ * lib/plans.ts. Returns null when the user's plan grants the feature,
+ * or a 403 NextResponse with upgradeRequired: true when it doesn't.
+ * Use this in API routes for finer-grained gating than the coarse
+ * requirePaidPlan() — e.g. individual analytics panels where "basic"
+ * views are free but "full analytics" is Growth+.
+ */
+export async function requireFeature(
+  userId: string,
+  featureKey: FeatureKey
+): Promise<NextResponse | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { plan: true },
+  });
+  if (!user) {
+    return NextResponse.json(
+      { ok: false, error: "User not found" },
+      { status: 404 }
+    );
+  }
+  if (!hasFeature(user.plan, featureKey)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `This feature requires a higher plan.`,
+        upgradeRequired: true,
+        feature: featureKey,
+      },
+      { status: 403 }
+    );
+  }
+  return null;
 }

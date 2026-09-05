@@ -23,8 +23,9 @@ function csvEscape(v: string): string {
 export async function POST(req: NextRequest) {
   try {
     const user = await requireUser();
-    const gate = await requirePaidPlan(user.id, "contact_book");
-    if (gate) return gate;
+    // Contact book itself is available on all plans (see lib/plans.ts —
+    // no contactBook feature flag). CSV export is still a paid feature
+    // (csvExport in the pricing table) so we gate JUST the export here.
     const planLimits = PLANS[user.plan as keyof typeof PLANS]?.limits;
     if (planLimits && !planLimits.csvExport) {
       return NextResponse.json(

@@ -17,10 +17,10 @@ import {
   BarChart3,
   Clock,
   AlertTriangle,
+  Lock,
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { UpgradePrompt } from "@/components/shared/UpgradePrompt";
 import { Heatmap } from "@/components/analytics/Heatmap";
 import {
   VolumeLineChart,
@@ -91,10 +91,20 @@ function fmtHourRange(h: number): string {
   return `${ampm(h)}–${ampm((h + 1) % 24)}`;
 }
 
+// Panels the sidebar / page always shows: summary, funnel, volume, campaign
+// table. Heatmap / templates / opt-outs are gated by fullAnalytics — those
+// three routes return 403 for Free & Starter, so we render an inline
+// upgrade card for each locked panel instead of hiding the whole page.
+type LockedPanels = { heatmap: boolean; templates: boolean; optouts: boolean };
+
 export default function AnalyticsPage() {
   const [range, setRange] = useState<Range>("30d");
-  const [upgradeRequired, setUpgradeRequired] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [locked, setLocked] = useState<LockedPanels>({
+    heatmap: false,
+    templates: false,
+    optouts: false,
+  });
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [volume, setVolume] = useState<VolumePoint[] | null>(null);
@@ -110,26 +120,32 @@ export default function AnalyticsPage() {
     let cancelled = false;
     setLoading(true);
     const qs = `?range=${range}`;
+    const withStatus = (url: string) =>
+      fetch(url).then((r) => r.json().then((j) => ({ status: r.status, j })));
     Promise.all([
-      fetch(`/api/analytics/summary${qs}`).then((r) => r.json().then((j) => ({ status: r.status, j }))),
-      fetch(`/api/analytics/volume${qs}`).then((r) => r.json()),
-      fetch(`/api/analytics/heatmap${qs}`).then((r) => r.json()),
-      fetch(`/api/analytics/templates`).then((r) => r.json()),
-      fetch(`/api/analytics/campaigns${qs}`).then((r) => r.json()),
-      fetch(`/api/analytics/optouts${qs}`).then((r) => r.json()),
+      withStatus(`/api/analytics/summary${qs}`),
+      withStatus(`/api/analytics/volume${qs}`),
+      withStatus(`/api/analytics/heatmap${qs}`),
+      withStatus(`/api/analytics/templates`),
+      withStatus(`/api/analytics/campaigns${qs}`),
+      withStatus(`/api/analytics/optouts${qs}`),
     ])
       .then(([s, v, h, t, c, o]) => {
         if (cancelled) return;
-        if (s.status === 403 && s.j?.upgradeRequired) {
-          setUpgradeRequired(true);
-          return;
-        }
         if (s.j?.ok) setSummary(s.j);
-        if (v?.ok) setVolume(v.points);
-        if (h?.ok) setHeatmap({ grid: h.grid, best: h.best });
-        if (t?.ok) setTemplates(t.templates);
-        if (c?.ok) setCampaigns(c.campaigns);
-        if (o?.ok) setOptouts(o);
+        if (v.j?.ok) setVolume(v.j.points);
+        if (c.j?.ok) setCampaigns(c.j.campaigns);
+        // Premium panels — 403 means the plan doesn't include fullAnalytics.
+        // Show the inline upgrade card; the rest of the page still renders.
+        const nextLocked: LockedPanels = {
+          heatmap: h.status === 403 && !!h.j?.upgradeRequired,
+          templates: t.status === 403 && !!t.j?.upgradeRequired,
+          optouts: o.status === 403 && !!o.j?.upgradeRequired,
+        };
+        setLocked(nextLocked);
+        if (!nextLocked.heatmap && h.j?.ok) setHeatmap({ grid: h.j.grid, best: h.j.best });
+        if (!nextLocked.templates && t.j?.ok) setTemplates(t.j.templates);
+        if (!nextLocked.optouts && o.j?.ok) setOptouts(o.j);
       })
       .catch((e: unknown) =>
         toast.error(e instanceof Error ? e.message : "Failed to load analytics")
@@ -139,23 +155,6 @@ export default function AnalyticsPage() {
       cancelled = true;
     };
   }, [range]);
-
-  if (upgradeRequired) {
-    return (
-      <div className="space-y-6">
-        <header className="max-w-5xl">
-          <h1 className="text-3xl font-bold tracking-tight">Analytics</h1>
-          <p className="text-muted-foreground mt-1">
-            Delivery + read rates, best send times, and opt-out tracking.
-          </p>
-        </header>
-        <UpgradePrompt
-          feature="Analytics Dashboard"
-          description="See real delivery + read rates, find the best hour to send, and track opt-outs over time. All based on real Meta webhook callbacks."
-        />
-      </div>
-    );
-  }
 
   const funnelData: FunnelBar[] = summary
     ? [
@@ -300,7 +299,12 @@ export default function AnalyticsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {heatmap ? (
+          {locked.heatmap ? (
+            <PanelLocked
+              title="Best-time heatmap is on Growth"
+              description="Upgrade to Growth to see read rates by weekday and hour, so you can pick the send window your audience actually opens."
+            />
+          ) : heatmap ? (
             <>
               <Heatmap grid={heatmap.grid} />
               {heatmap.best && (
@@ -331,7 +335,14 @@ export default function AnalyticsPage() {
           <CardDescription>All-time, ranked by read rate.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
-          {templates && templates.length > 0 ? (
+          {locked.templates ? (
+            <div className="p-4">
+              <PanelLocked
+                title="Template performance is on Growth"
+                description="Upgrade to Growth to rank every template by read rate and spot which openers land."
+              />
+            </div>
+          ) : templates && templates.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-muted-foreground">
@@ -451,7 +462,12 @@ export default function AnalyticsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {optouts ? (
+          {locked.optouts ? (
+            <PanelLocked
+              title="Opt-out tracking is on Growth"
+              description="Upgrade to Growth to see opt-out totals, this-month counts, and the daily trend line."
+            />
+          ) : optouts ? (
             <>
               <div className="grid grid-cols-3 gap-3 text-sm">
                 <div className="rounded-md border bg-zinc-50 px-3 py-2">
@@ -522,6 +538,27 @@ function EmptyHint({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
     <div className="text-center py-10 text-muted-foreground">
       <Icon className="w-8 h-8 mx-auto mb-2 opacity-50" />
       <div className="text-sm">{label}</div>
+    </div>
+  );
+}
+
+// Inline lock card shown in place of a premium panel when the plan
+// doesn't include fullAnalytics. The page keeps rendering; only the
+// individual panel is replaced with this upgrade CTA.
+function PanelLocked({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-amber-300 bg-amber-50/50 p-6 text-center">
+      <div className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-amber-100 text-amber-700 mb-3">
+        <Lock className="w-4 h-4" />
+      </div>
+      <div className="font-medium text-zinc-900">{title}</div>
+      <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">{description}</p>
+      <Link
+        href="/billing"
+        className="inline-block mt-4 text-sm font-medium text-whatsapp hover:underline"
+      >
+        View plans →
+      </Link>
     </div>
   );
 }

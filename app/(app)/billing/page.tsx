@@ -61,22 +61,26 @@ function pickStatusBadge(
 }
 
 /**
- * One-line plan status under the title. Three visual states encode urgency:
+ * One-line plan status under the title. Four visual states encode urgency:
  *   - past_due → red, action-required copy
  *   - cancelAtPeriodEnd → amber, winding-down copy
- *   - active subscription → muted, "Renews [date]"
- *   - free → muted, "You're on the free plan."
+ *   - active paid subscription → muted, "Renews [date]"
+ *   - free → muted, "Usage resets [date]" — Free plan has no Stripe
+ *     subscription; the usage counter is tied to usagePeriodStart, so we
+ *     surface that date instead of the (undefined) subscription renewal.
  */
 function SubscriptionStatusLine({
   plan,
   status,
   cancelAtPeriodEnd,
   currentPeriodEnd,
+  freeUsageResetAt,
 }: {
   plan: PlanId;
   status: string | null;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: Date | null;
+  freeUsageResetAt: Date | null;
 }) {
   // Payment failed — most urgent, render in red.
   if (status === "past_due") {
@@ -108,11 +112,12 @@ function SubscriptionStatusLine({
     );
   }
 
-  // Free plan — informational hint.
+  // Free plan — no subscription to renew, so show when the message
+  // counter next rolls over instead.
   if (plan === "free") {
     return (
       <p className="text-sm text-muted-foreground mt-1">
-        You&apos;re on the free plan.
+        Usage resets {fmtDate(freeUsageResetAt)}
       </p>
     );
   }
@@ -152,6 +157,17 @@ export default async function BillingPage({
   const planCards = getAllPlansOrdered();
   const currentInterval: BillingInterval =
     user.billingInterval === "year" ? "year" : "month";
+
+  // Free-plan usage-reset date: 30 days after usagePeriodStart. Paid
+  // plans use currentPeriodEnd from Stripe instead.
+  const freeUsageResetAt =
+    plan.id === "free" && user.usagePeriodStart
+      ? new Date(
+          new Date(user.usagePeriodStart).getTime() + 30 * 24 * 60 * 60 * 1000
+        )
+      : null;
+  const usageResetDate =
+    plan.id === "free" ? freeUsageResetAt : user.currentPeriodEnd;
 
   // Color the bar based on usage band.
   const bandClass =
@@ -214,6 +230,7 @@ export default async function BillingPage({
             status={user.stripeSubscriptionStatus}
             cancelAtPeriodEnd={user.cancelAtPeriodEnd}
             currentPeriodEnd={user.currentPeriodEnd}
+            freeUsageResetAt={freeUsageResetAt}
           />
         </CardHeader>
         <CardContent className="space-y-4">
@@ -243,16 +260,18 @@ export default async function BillingPage({
               <span>{percentLabel} used</span>
               <span>·</span>
               <span>{Math.max(0, limit - used).toLocaleString()} remaining</span>
-              {user.currentPeriodEnd && (
+              {usageResetDate && (
                 <>
                   <span>·</span>
-                  <span>Resets {fmtDate(user.currentPeriodEnd)}</span>
+                  <span>Resets {fmtDate(usageResetDate)}</span>
                 </>
               )}
             </div>
           </div>
 
-          {user.stripeCustomerId && (
+          {/* Manage Subscription only for paid plans with a Stripe
+              customer — Free has nothing to manage. */}
+          {plan.id !== "free" && user.stripeCustomerId && (
             <div className="pt-2 border-t flex flex-wrap gap-2">
               <PortalButton
                 label={
@@ -276,7 +295,7 @@ export default async function BillingPage({
         <PlanComparison
           currentPlan={plan.id}
           currentInterval={currentInterval}
-          hasBillingAccount={Boolean(user.stripeCustomerId)}
+          hasBillingAccount={plan.id !== "free" && Boolean(user.stripeCustomerId)}
           plans={planCards}
         />
       </div>

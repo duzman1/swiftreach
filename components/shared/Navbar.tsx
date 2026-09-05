@@ -50,11 +50,11 @@ const SECTIONS: { items: NavItem[] }[] = [
   },
   {
     items: [
-      { href: "/contacts", label: "Contacts", icon: BookOpen, paidOnly: true },
+      { href: "/contacts", label: "Contacts", icon: BookOpen },
       { href: "/scheduled", label: "Scheduled", icon: Clock, paidOnly: true },
       { href: "/automations", label: "Automations", icon: Sparkles, paidOnly: true },
       { href: "/campaigns", label: "Campaigns", icon: History },
-      { href: "/analytics", label: "Analytics", icon: BarChart3, paidOnly: true },
+      { href: "/analytics", label: "Analytics", icon: BarChart3 },
       { href: "/templates", label: "Templates", icon: FileText },
       { href: "/whatsapp-templates", label: "WhatsApp Templates", icon: MessageSquare },
     ],

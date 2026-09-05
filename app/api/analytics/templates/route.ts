@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { requirePaidPlan } from "@/lib/planGate";
+import { requireFeature } from "@/lib/planGate";
 import { pct } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ interface Row {
 export async function GET() {
   try {
     const userId = await requireUserId();
-    const gate = await requirePaidPlan(userId, "analytics");
+    const gate = await requireFeature(userId, "fullAnalytics");
     if (gate) return gate;
 
     // Pull both freeform-message-as-template (saved via "Save as template")

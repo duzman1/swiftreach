@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { requirePaidPlan } from "@/lib/planGate";
+import { requireFeature } from "@/lib/planGate";
 import { parseRange, emptyDailySeries, ymd, pct } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   try {
     const userId = await requireUserId();
-    const gate = await requirePaidPlan(userId, "analytics");
+    const gate = await requireFeature(userId, "fullAnalytics");
     if (gate) return gate;
 
     const url = new URL(req.url);
