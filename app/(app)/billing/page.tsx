@@ -66,15 +66,18 @@ function pickStatusBadge(
 }
 
 /**
- * One-line plan status under the title. Four visual states encode urgency:
+ * One-line plan status under the title.
+ *
+ * FREE is short-circuited FIRST. Nothing else on this row may render
+ * for a Free account, because a downgraded account can carry stale
+ * Stripe fields (stripeSubscriptionStatus, currentPeriodEnd) from
+ * its previous paid subscription, and rendering "Renews <date>" from
+ * those would lie — there's no live subscription to renew from.
+ *
+ * Paid plans fall through to the Stripe-driven branches:
  *   - past_due → red, action-required copy
  *   - cancelAtPeriodEnd → amber, winding-down copy
- *   - active paid subscription → muted, "Renews [date]" (Stripe date)
- *   - free → muted, "Usage resets [Month 1]" (calendar-month reset)
- *
- * The Stripe billing anniversary and the usage-cycle boundary are
- * independent: paid plans see both a Stripe renewal date here and a
- * calendar-month usage reset in the meter below.
+ *   - active | trialing → muted, "Renews [date]" (Stripe date)
  */
 function SubscriptionStatusLine({
   plan,
@@ -89,6 +92,17 @@ function SubscriptionStatusLine({
   currentPeriodEnd: Date | null;
   usageResetsAt: Date;
 }) {
+  // Free — no Stripe subscription is authoritative. Show the
+  // calendar-month usage reset here (paid plans get their reset
+  // date from the usage meter below).
+  if (plan === "free") {
+    return (
+      <p className="text-sm text-muted-foreground mt-1">
+        Usage resets {formatResetDate(usageResetsAt)}
+      </p>
+    );
+  }
+
   // Payment failed — most urgent, render in red.
   if (status === "past_due") {
     return (
@@ -115,16 +129,6 @@ function SubscriptionStatusLine({
     return (
       <p className="text-sm text-muted-foreground mt-1">
         Renews {fmtDate(currentPeriodEnd)}
-      </p>
-    );
-  }
-
-  // Free plan — no subscription to renew, so show when the message
-  // counter next rolls over instead.
-  if (plan === "free") {
-    return (
-      <p className="text-sm text-muted-foreground mt-1">
-        Usage resets {formatResetDate(usageResetsAt)}
       </p>
     );
   }
