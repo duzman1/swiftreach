@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/adminAuth";
 import { handleApiError } from "@/lib/apiResponse";
 import { PLANS } from "@/lib/stripe";
+import { normalizedMonthlyRevenue, type BillingInterval } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -59,17 +60,38 @@ export async function GET() {
       }),
     ]);
 
-    // MRR — sum of paid plan prices weighted by active subscribers on each plan.
-    // Stripe is the source of truth for revenue; this is a fast estimate from
-    // local plan counts, good enough for a dashboard tile.
-    let mrr = 0;
-    const planBreakdown: Record<string, number> = { free: 0, starter: 0, growth: 0 };
+    // MRR — sum of normalized monthly revenue per user, accounting for
+    // billingInterval (annual plans divided by 12). Stripe is still the
+    // source of truth for actual revenue; this is a fast estimate from
+    // local plan+interval columns, good enough for a dashboard tile.
+    // Pro tier included.
+    const planBreakdown: Record<string, number> = {
+      free: 0,
+      starter: 0,
+      growth: 0,
+      pro: 0,
+    };
     for (const row of planCounts) {
       planBreakdown[row.plan] = row._count.plan;
     }
-    for (const planId of Object.keys(planBreakdown) as Array<keyof typeof PLANS>) {
-      mrr += planBreakdown[planId] * PLANS[planId].price;
+
+    // Fetch plan + interval pairs for the MRR sum. Cheap because we
+    // only need paid rows.
+    const paidUsers = await prisma.user.findMany({
+      where: { plan: { in: ["starter", "growth", "pro"] } },
+      select: { plan: true, billingInterval: true },
+    });
+    let mrr = 0;
+    for (const u of paidUsers) {
+      const interval: BillingInterval =
+        u.billingInterval === "year" ? "year" : "month";
+      mrr += normalizedMonthlyRevenue(u.plan, interval);
     }
+    mrr = Math.round(mrr);
+
+    // Keep the legacy PLANS reference in scope — used for the plan
+    // breakdown labels below; no logic depends on it after MRR.
+    void PLANS;
 
     // 7-day signups for the "trend" sparkline.
     const newUsers7d = await prisma.user.count({

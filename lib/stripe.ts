@@ -1,14 +1,33 @@
-// Stripe client + plan configuration. This file is the SINGLE SOURCE OF
-// TRUTH for plan limits and features — never hardcode plan numbers anywhere
-// else in the app. Every limit check imports from PLANS below.
+// Stripe SDK client + backward-compatible re-exports of the OLD plan
+// helpers.
 //
-// The Stripe SDK is server-side only — STRIPE_SECRET_KEY must never be
-// imported into a client component. The publishable key is fine on client.
+// The authoritative source for plan pricing, limits, features, and
+// price-id mappings is now lib/plans.ts. This file exists for two
+// reasons:
+//
+//   1. The Stripe SDK client getStripe() lives here — kept in place so
+//      the 20+ imports of it don't have to churn.
+//
+//   2. It preserves the old public surface (PLANS, getPlan,
+//      getPlanLimits, getPlanName, getPlanByPriceId, PlanId, Plan,
+//      PlanLimits) that ~27 files across the codebase import. Those
+//      re-exports are thin adapters onto the new lib/plans.ts data,
+//      shaped like the old PLANS record so existing call sites see
+//      the additional "pro" tier without needing code changes.
+//
+// New code should import directly from lib/plans.ts and use the new
+// helpers (getLimit, hasFeature, isAtOrAbove, planFromPriceId).
 
 import Stripe from "stripe";
+import {
+  PLANS as NEW_PLANS,
+  getPlan as newGetPlan,
+  type Plan as NewPlan,
+  type PlanId as NewPlanId,
+} from "./plans";
 
-// Read lazily so importing this module from a client component (which would
-// just use the type exports) doesn't blow up at boot.
+// ── Stripe SDK client ─────────────────────────────────────────────────
+
 let cachedStripe: Stripe | null = null;
 export function getStripe(): Stripe {
   if (cachedStripe) return cachedStripe;
@@ -18,16 +37,13 @@ export function getStripe(): Stripe {
       "STRIPE_SECRET_KEY is not set. See STRIPE_SETUP.md to configure billing."
     );
   }
-  // Don't pin apiVersion — let the installed SDK use its default. Pinning
-  // requires keeping the literal in sync with the SDK's union type, which
-  // shifts on every Stripe release. The webhook event handlers below are
-  // resilient to small shape changes via narrow typing where it matters.
   cachedStripe = new Stripe(key);
   return cachedStripe;
 }
 
-// Lower-cased plan identifiers used throughout the codebase + DB.
-export type PlanId = "free" | "starter" | "growth";
+// ── Legacy plan type surface — do not use in new code ─────────────────
+
+export type PlanId = NewPlanId;
 
 export interface PlanLimits {
   /** Hard cap on outbound WhatsApp messages per billing cycle. */
@@ -42,99 +58,81 @@ export interface PlanLimits {
   csvExport: boolean;
   /** Whether the Google Drive picker is enabled. */
   googleDrive: boolean;
-  /** Team seats (Phase 5). */
+  /** Team seats. */
   teamMembers: number;
 }
 
 export interface Plan {
   id: PlanId;
   name: string;
-  /** Monthly price in USD (display only — Stripe is the source of truth). */
   price: number;
-  /** Stripe Price ID. null for Free, undefined if env var missing. */
   priceId: string | null | undefined;
   limits: PlanLimits;
   features: string[];
 }
 
+// Adapt a new-shape Plan → old-shape Plan for legacy consumers.
+function toLegacy(p: NewPlan): Plan {
+  const featureStrings: string[] = [];
+  featureStrings.push(`${p.limits.messagesPerMonth.toLocaleString()} messages per month`);
+  featureStrings.push(`${p.limits.whatsappNumbers} WhatsApp number${p.limits.whatsappNumbers === 1 ? "" : "s"}`);
+  featureStrings.push(
+    p.limits.savedTemplates === null
+      ? "Unlimited templates"
+      : `Up to ${p.limits.savedTemplates} saved templates`
+  );
+  featureStrings.push(
+    p.limits.campaignHistory === null
+      ? "Full campaign history"
+      : `Last ${p.limits.campaignHistory} campaigns`
+  );
+  if (p.features.csvExport) featureStrings.push("CSV export");
+  if (p.features.googleDriveImport) featureStrings.push("Google Drive import");
+  if (p.features.scheduledCampaigns) featureStrings.push("Scheduled campaigns");
+  if (p.features.fullAnalytics) featureStrings.push("Full analytics");
+  if (p.features.analyticsExport) featureStrings.push("Analytics export");
+  if (p.features.savedAudiences) featureStrings.push("Saved audiences");
+  if (p.features.whiteLabelReports) featureStrings.push("White-label reports");
+  if (p.features.clientWorkspaces) featureStrings.push("Client workspaces");
+  if (p.features.customOnboarding) featureStrings.push("Custom onboarding");
+  featureStrings.push(p.supportSla);
+
+  return {
+    id: p.id,
+    name: p.name,
+    price: p.monthlyPrice,
+    // Legacy consumers expect a single priceId (monthly). Annual is
+    // accessed via lib/plans.ts's stripeAnnualPriceId directly.
+    priceId: p.stripeMonthlyPriceId,
+    limits: {
+      messagesPerMonth: p.limits.messagesPerMonth,
+      templates:
+        p.limits.savedTemplates === null ? Infinity : p.limits.savedTemplates,
+      campaignHistory:
+        p.limits.campaignHistory === null
+          ? Infinity
+          : p.limits.campaignHistory,
+      phoneNumbers: p.limits.whatsappNumbers,
+      csvExport: p.features.csvExport,
+      googleDrive: p.features.googleDriveImport,
+      teamMembers: p.limits.teamMembers,
+    },
+    features: featureStrings,
+  };
+}
+
+/** LEGACY. PLANS[planId] returns an old-shape Plan for backward
+ *  compatibility with the 20+ pre-existing imports of this record.
+ *  New code should read from lib/plans.ts directly. */
 export const PLANS: Record<PlanId, Plan> = {
-  free: {
-    id: "free",
-    name: "Free",
-    price: 0,
-    priceId: null,
-    limits: {
-      messagesPerMonth: 500,
-      templates: 3,
-      campaignHistory: 10,
-      phoneNumbers: 1,
-      csvExport: false,
-      googleDrive: false,
-      teamMembers: 1,
-    },
-    features: [
-      "500 messages per month",
-      "1 WhatsApp number",
-      "Up to 3 saved templates",
-      "Last 10 campaigns",
-      "Community support",
-    ],
-  },
-  starter: {
-    id: "starter",
-    name: "Starter",
-    price: 29,
-    priceId: process.env.STRIPE_STARTER_MONTHLY_PRICE_ID,
-    limits: {
-      messagesPerMonth: 5000,
-      templates: Infinity,
-      campaignHistory: Infinity,
-      phoneNumbers: 1,
-      csvExport: true,
-      googleDrive: true,
-      teamMembers: 1,
-    },
-    features: [
-      "5,000 messages per month",
-      "1 WhatsApp number",
-      "Unlimited templates",
-      "Full campaign history",
-      "CSV export",
-      "Google Drive import",
-      "Email support",
-    ],
-  },
-  growth: {
-    id: "growth",
-    name: "Growth",
-    price: 79,
-    priceId: process.env.STRIPE_GROWTH_MONTHLY_PRICE_ID,
-    limits: {
-      messagesPerMonth: 25000,
-      templates: Infinity,
-      campaignHistory: Infinity,
-      phoneNumbers: 3,
-      csvExport: true,
-      googleDrive: true,
-      teamMembers: 3,
-    },
-    features: [
-      "25,000 messages per month",
-      "3 WhatsApp numbers",
-      "Unlimited templates",
-      "Full campaign history",
-      "CSV export",
-      "Google Drive import",
-      "Priority support",
-      "Analytics dashboard",
-      "Up to 3 team members",
-    ],
-  },
+  free: toLegacy(NEW_PLANS.free),
+  starter: toLegacy(NEW_PLANS.starter),
+  growth: toLegacy(NEW_PLANS.growth),
+  pro: toLegacy(NEW_PLANS.pro),
 };
 
 export function getPlan(plan: string | null | undefined): Plan {
-  if (plan && plan in PLANS) return PLANS[plan as PlanId];
-  return PLANS.free;
+  return toLegacy(newGetPlan(plan));
 }
 
 export function getPlanLimits(plan: string | null | undefined): PlanLimits {
@@ -145,11 +143,16 @@ export function getPlanName(plan: string | null | undefined): string {
   return getPlan(plan).name;
 }
 
-/** Lookup a plan by its Stripe Price ID. Used by the webhook handler. */
-export function getPlanByPriceId(priceId: string | null | undefined): Plan | null {
+/** LEGACY. New code should call planFromPriceId() from lib/plans.ts
+ *  which also returns the billing interval (month | year). */
+export function getPlanByPriceId(
+  priceId: string | null | undefined
+): Plan | null {
   if (!priceId) return null;
-  for (const p of Object.values(PLANS)) {
-    if (p.priceId && p.priceId === priceId) return p;
+  for (const p of Object.values(NEW_PLANS)) {
+    if (p.stripeMonthlyPriceId === priceId || p.stripeAnnualPriceId === priceId) {
+      return toLegacy(p);
+    }
   }
   return null;
 }

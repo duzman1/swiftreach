@@ -59,9 +59,15 @@ model User {
   setupPaymentId  String?
 
   // ── Billing (Phase 4) ─────────────────────────────────────────────────
-  // Plan id matches keys in lib/stripe.ts PLANS — the single source of truth
+  // Plan id matches keys in lib/plans.ts PLANS — the single source of truth
   // for limits/features. NEVER hardcode plan limits anywhere else.
-  plan String @default("free") // free | starter | growth
+  plan String @default("free") // free | starter | growth | pro
+
+  // Billing interval — "month" or "year". Set by the Stripe webhook based
+  // on which price id the subscription is bound to. Used by the admin
+  // MRR calc (annual plans / 12) and by the billing UI to render the
+  // right price on the current-plan card.
+  billingInterval String @default("month") // month | year
 
   // Stripe customer + subscription identity. Set the first time the user
   // hits checkout; updated on every subscription event via the webhook.

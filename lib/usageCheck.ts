@@ -5,12 +5,12 @@
 import { prisma } from "./prisma";
 import { getPlanLimits, type PlanLimits } from "./stripe";
 
-// Plans that grant full send access regardless of the Stripe subscription
-// status field. The trade-off: a paid user whose card just declined (status
-// "past_due") keeps sending until the Stripe webhook downgrades their plan
-// — preferable to false-positive lock-outs during card retry windows or
-// after Clerk dev→prod migrations that leave the user row with a paid
-// `plan` value but no `stripeSubscriptionStatus` linked.
+// Plans that grant full send access. Access is decided by the `plan`
+// field on the user record ONLY — never by stripeSubscriptionStatus.
+// Comped accounts, beta users, and admin overrides that set
+// plan="pro" manually with no active Stripe subscription must still
+// get full pro access. See lib/plans.ts for the CRITICAL BEHAVIOUR
+// comment. This is the enforcement point for that invariant.
 const PAID_PLANS = ["starter", "growth", "pro"] as const;
 
 export interface AllowedResult {

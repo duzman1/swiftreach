@@ -64,5 +64,5 @@ export async function requirePaidPlan(
  * Returns true when the user is allowed to access the feature.
  */
 export function isPaidPlan(plan: string | null | undefined): boolean {
-  return plan === "starter" || plan === "growth";
+  return plan === "starter" || plan === "growth" || plan === "pro";
 }

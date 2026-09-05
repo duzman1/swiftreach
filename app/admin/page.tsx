@@ -6,7 +6,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/adminAuth";
-import { PLANS } from "@/lib/stripe";
+import { normalizedMonthlyRevenue, type BillingInterval } from "@/lib/plans";
 import { formatNumber } from "@/lib/utils";
 import { StatCard } from "@/components/admin/StatCard";
 import { GrowthLineChart, PlanDonutChart } from "@/components/admin/OverviewCharts";
@@ -105,12 +105,27 @@ export default async function AdminOverviewPage() {
   ]);
 
   // ── Plan breakdown + MRR ───────────────────────────────────────────────
-  const planBreakdown: Record<string, number> = { free: 0, starter: 0, growth: 0 };
+  const planBreakdown: Record<string, number> = {
+    free: 0,
+    starter: 0,
+    growth: 0,
+    pro: 0,
+  };
   for (const row of planCounts) planBreakdown[row.plan] = row._count.plan;
+
+  // MRR from local plan + interval columns. Annual plans normalize to
+  // their per-month equivalent (annualPrice / 12). See lib/plans.ts.
+  const paidUsers = await prisma.user.findMany({
+    where: { plan: { in: ["starter", "growth", "pro"] } },
+    select: { plan: true, billingInterval: true },
+  });
   let mrr = 0;
-  for (const planId of Object.keys(planBreakdown) as Array<keyof typeof PLANS>) {
-    mrr += planBreakdown[planId] * PLANS[planId].price;
+  for (const u of paidUsers) {
+    const interval: BillingInterval =
+      u.billingInterval === "year" ? "year" : "month";
+    mrr += normalizedMonthlyRevenue(u.plan, interval);
   }
+  mrr = Math.round(mrr);
 
   // ── 30-day series ──────────────────────────────────────────────────────
   const signupsMap = emptySeries(30);
@@ -132,6 +147,7 @@ export default async function AdminOverviewPage() {
     { name: "Free", value: planBreakdown.free },
     { name: "Starter", value: planBreakdown.starter },
     { name: "Growth", value: planBreakdown.growth },
+    { name: "Pro", value: planBreakdown.pro },
   ];
 
   const messagesSent30d = campaignAggregate30d._sum.sentCount ?? 0;
@@ -158,7 +174,7 @@ export default async function AdminOverviewPage() {
         <StatCard
           label="Active subscribers"
           value={formatNumber(activeSubscribers)}
-          delta={`${formatNumber(planBreakdown.starter)} starter · ${formatNumber(planBreakdown.growth)} growth`}
+          delta={`${formatNumber(planBreakdown.starter)} starter · ${formatNumber(planBreakdown.growth)} growth · ${formatNumber(planBreakdown.pro)} pro`}
           icon={CreditCard}
         />
         <StatCard

@@ -7,7 +7,8 @@ import { Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireUser } from "@/lib/auth";
-import { PLANS, getPlan, type PlanId } from "@/lib/stripe";
+import { getPlan, type PlanId } from "@/lib/stripe";
+import { getAllPlansOrdered, type BillingInterval } from "@/lib/plans";
 import { PlanComparison } from "@/components/billing/PlanComparison";
 import { PortalButton } from "@/components/billing/PortalButton";
 
@@ -134,21 +135,12 @@ export default async function BillingPage({
   const limit = plan.limits.messagesPerMonth;
   const percent = limit > 0 && Number.isFinite(limit) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
 
-  const planCards = (Object.values(PLANS) as Array<(typeof PLANS)[PlanId]>).map((p) => ({
-    id: p.id,
-    name: p.name,
-    price: p.price,
-    features: p.features,
-    limits: {
-      messagesPerMonth: p.limits.messagesPerMonth,
-      templates: p.limits.templates,
-      campaignHistory: p.limits.campaignHistory,
-      csvExport: p.limits.csvExport,
-      googleDrive: p.limits.googleDrive,
-      teamMembers: p.limits.teamMembers,
-    },
-    priceConfigured: p.id === "free" || Boolean(p.priceId),
-  }));
+  // New-shape plan objects sourced directly from lib/plans.ts. The
+  // PlanComparison component handles the monthly/annual toggle and
+  // the 4-tier grid; no need to pre-shape here.
+  const planCards = getAllPlansOrdered();
+  const currentInterval: BillingInterval =
+    user.billingInterval === "year" ? "year" : "month";
 
   // Color the bar based on usage band.
   const bandClass =
@@ -186,8 +178,15 @@ export default async function BillingPage({
           <CardTitle className="flex items-center gap-3">
             Your Plan
             <span className="text-base font-normal text-muted-foreground">
-              {plan.name}{" "}
-              {plan.price > 0 && <span>· ${plan.price}/mo</span>}
+              {plan.name}
+              {plan.price > 0 && (
+                <>
+                  {" "}·{" "}
+                  {currentInterval === "year"
+                    ? `$${(plan.price * 10).toLocaleString()}/yr`
+                    : `$${plan.price}/mo`}
+                </>
+              )}
             </span>
             {pickStatusBadge(
               plan.id,
@@ -265,6 +264,7 @@ export default async function BillingPage({
         </h2>
         <PlanComparison
           currentPlan={plan.id}
+          currentInterval={currentInterval}
           hasBillingAccount={Boolean(user.stripeCustomerId)}
           plans={planCards}
         />

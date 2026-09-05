@@ -12,7 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
-import { getStripe, getPlanByPriceId } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
+import { planFromPriceId, hasFeature, type PlanId, type BillingInterval } from "@/lib/plans";
 import { resetMonthlyUsage } from "@/lib/usageCheck";
 import { logError } from "@/lib/errorLog";
 
@@ -103,14 +104,39 @@ export async function POST(req: NextRequest) {
           break;
         }
         const priceId = sub.items.data[0]?.price.id ?? null;
-        // Resolve plan from priceId rather than trusting metadata alone — if
-        // the user upgraded via the Customer Portal, metadata may be stale.
-        const plan = getPlanByPriceId(priceId)?.id ?? sub.metadata?.plan ?? "free";
+
+        // Resolve plan + billing interval from priceId. Customer Portal
+        // upgrades leave metadata stale, so priceId is the source of
+        // truth. If the priceId isn't in our mapping, log an error
+        // (env var missing in production) and fall back to metadata.
+        const mapping = planFromPriceId(priceId);
+        if (!mapping && priceId) {
+          await logError(
+            "billing.webhook.unmappedPriceId",
+            new Error(`Stripe price id ${priceId} is not mapped to any plan — check STRIPE_*_PRICE_ID env vars`),
+            { userId }
+          );
+        }
+        const plan: PlanId =
+          mapping?.planId ?? (sub.metadata?.plan as PlanId) ?? "free";
+        const billingInterval: BillingInterval =
+          mapping?.interval ??
+          (sub.metadata?.interval === "year" ? "year" : "month");
+
+        // Look up the user's PREVIOUS plan so we can react to
+        // downgrades (e.g. pause scheduled campaigns if the new plan
+        // no longer allows them).
+        const previousUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { plan: true },
+        });
+
         const period = readCurrentPeriod(sub);
         await prisma.user.update({
           where: { id: userId },
           data: {
             plan,
+            billingInterval,
             stripeSubscriptionId: sub.id,
             stripeSubscriptionStatus: sub.status,
             stripePriceId: priceId,
@@ -119,6 +145,20 @@ export async function POST(req: NextRequest) {
             cancelAtPeriodEnd: sub.cancel_at_period_end,
           },
         });
+
+        // Downgrade safety: if the new plan lacks scheduledCampaigns,
+        // pause (don't delete) any still-active scheduled campaigns.
+        // On upgrade back to a plan that does support them, auto-resume
+        // the ones we previously paused.
+        if (previousUser && previousUser.plan !== plan) {
+          const supported = hasFeature(plan, "scheduledCampaigns");
+          if (!supported) {
+            await pauseScheduledIfUnsupported(userId);
+          } else if (!hasFeature(previousUser.plan, "scheduledCampaigns")) {
+            await resumePreviouslyPaused(userId);
+          }
+        }
+
         break;
       }
 
@@ -131,12 +171,16 @@ export async function POST(req: NextRequest) {
           where: { id: userId },
           data: {
             plan: "free",
+            billingInterval: "month",
             stripeSubscriptionId: null,
             stripeSubscriptionStatus: "canceled",
             stripePriceId: null,
             cancelAtPeriodEnd: false,
           },
         });
+        // Free plan doesn't include scheduled campaigns — pause any
+        // still-active ones rather than orphaning them.
+        await pauseScheduledIfUnsupported(userId);
         break;
       }
 
@@ -283,5 +327,53 @@ export async function POST(req: NextRequest) {
     await logError("POST /api/billing/webhook", err);
     // Return 500 so Stripe retries — DB hiccup, transient downstream, etc.
     return bad(500, "Handler error");
+  }
+}
+
+// Pause (don't delete) still-active scheduled campaigns for a user
+// whose plan no longer includes scheduledCampaigns. Uses status
+// "paused_by_plan" so it's distinguishable from user-initiated
+// cancellation and can be auto-resumed on upgrade. The cron already
+// only picks "scheduled" rows so paused ones are naturally skipped.
+async function pauseScheduledIfUnsupported(userId: string) {
+  try {
+    const result = await prisma.scheduledCampaign.updateMany({
+      where: {
+        userId,
+        status: { in: ["scheduled", "running"] },
+      },
+      data: { status: "paused_by_plan" },
+    });
+    if (result.count > 0) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `Paused ${result.count} scheduled campaign(s) for user ${userId} (plan no longer includes scheduledCampaigns)`
+      );
+    }
+  } catch (err) {
+    // Non-fatal — the plan update already happened; scheduled pause
+    // is a best-effort follow-up.
+    await logError("billing.webhook.pauseScheduled", err, { userId });
+  }
+}
+
+// Un-pause scheduled campaigns previously paused by a downgrade.
+// Called when the user upgrades back to a plan that includes
+// scheduledCampaigns. Only flips "paused_by_plan" rows — leaves any
+// user-cancelled rows alone.
+async function resumePreviouslyPaused(userId: string) {
+  try {
+    const result = await prisma.scheduledCampaign.updateMany({
+      where: { userId, status: "paused_by_plan" },
+      data: { status: "scheduled" },
+    });
+    if (result.count > 0) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `Resumed ${result.count} scheduled campaign(s) for user ${userId} after plan upgrade`
+      );
+    }
+  } catch (err) {
+    await logError("billing.webhook.resumeScheduled", err, { userId });
   }
 }
