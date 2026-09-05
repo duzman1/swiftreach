@@ -9,6 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { requireUser } from "@/lib/auth";
 import { getPlan, type PlanId } from "@/lib/stripe";
 import { getAllPlansOrdered, type BillingInterval } from "@/lib/plans";
+import {
+  firstOfNextMonthUtc,
+  formatResetDate,
+} from "@/lib/usagePeriod";
+import { ensureUsagePeriodCurrent } from "@/lib/usageCheck";
 import { PlanComparison } from "@/components/billing/PlanComparison";
 import { PortalButton } from "@/components/billing/PortalButton";
 
@@ -64,23 +69,25 @@ function pickStatusBadge(
  * One-line plan status under the title. Four visual states encode urgency:
  *   - past_due → red, action-required copy
  *   - cancelAtPeriodEnd → amber, winding-down copy
- *   - active paid subscription → muted, "Renews [date]"
- *   - free → muted, "Usage resets [date]" — Free plan has no Stripe
- *     subscription; the usage counter is tied to usagePeriodStart, so we
- *     surface that date instead of the (undefined) subscription renewal.
+ *   - active paid subscription → muted, "Renews [date]" (Stripe date)
+ *   - free → muted, "Usage resets [Month 1]" (calendar-month reset)
+ *
+ * The Stripe billing anniversary and the usage-cycle boundary are
+ * independent: paid plans see both a Stripe renewal date here and a
+ * calendar-month usage reset in the meter below.
  */
 function SubscriptionStatusLine({
   plan,
   status,
   cancelAtPeriodEnd,
   currentPeriodEnd,
-  freeUsageResetAt,
+  usageResetsAt,
 }: {
   plan: PlanId;
   status: string | null;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: Date | null;
-  freeUsageResetAt: Date | null;
+  usageResetsAt: Date;
 }) {
   // Payment failed — most urgent, render in red.
   if (status === "past_due") {
@@ -117,7 +124,7 @@ function SubscriptionStatusLine({
   if (plan === "free") {
     return (
       <p className="text-sm text-muted-foreground mt-1">
-        Usage resets {fmtDate(freeUsageResetAt)}
+        Usage resets {formatResetDate(usageResetsAt)}
       </p>
     );
   }
@@ -132,11 +139,15 @@ export default async function BillingPage({
 }) {
   const user = await requireUser();
   const plan = getPlan(user.plan);
+  // Snap to the current calendar-month period before we read the
+  // counter, so a Free account stuck at last month's number resets
+  // to 0 on this page-load rather than requiring a send attempt.
+  const rolled = await ensureUsagePeriodCurrent(user.id);
   // ?feature=… set when the user was redirected here by a paid-feature
   // gate. Render an amber upgrade banner above the rest of the page.
   const featureKey = searchParams?.feature ?? "";
   const featureMessage = FEATURE_MESSAGES[featureKey] ?? null;
-  const used = user.messagesUsedThisMonth;
+  const used = rolled?.used ?? user.messagesUsedThisMonth;
   const limit = plan.limits.messagesPerMonth;
   // Two numbers: `percent` is an integer used for the bar width +
   // color-band bucketing; `percentLabel` is the human-readable string
@@ -158,16 +169,9 @@ export default async function BillingPage({
   const currentInterval: BillingInterval =
     user.billingInterval === "year" ? "year" : "month";
 
-  // Free-plan usage-reset date: 30 days after usagePeriodStart. Paid
-  // plans use currentPeriodEnd from Stripe instead.
-  const freeUsageResetAt =
-    plan.id === "free" && user.usagePeriodStart
-      ? new Date(
-          new Date(user.usagePeriodStart).getTime() + 30 * 24 * 60 * 60 * 1000
-        )
-      : null;
-  const usageResetDate =
-    plan.id === "free" ? freeUsageResetAt : user.currentPeriodEnd;
+  // Usage cycle is calendar-month: the 1st of the next month at
+  // 00:00 UTC, plan-independent. See lib/usagePeriod.ts.
+  const usageResetsAt = firstOfNextMonthUtc();
 
   // Color the bar based on usage band.
   const bandClass =
@@ -230,7 +234,7 @@ export default async function BillingPage({
             status={user.stripeSubscriptionStatus}
             cancelAtPeriodEnd={user.cancelAtPeriodEnd}
             currentPeriodEnd={user.currentPeriodEnd}
-            freeUsageResetAt={freeUsageResetAt}
+            usageResetsAt={usageResetsAt}
           />
         </CardHeader>
         <CardContent className="space-y-4">
@@ -260,12 +264,8 @@ export default async function BillingPage({
               <span>{percentLabel} used</span>
               <span>·</span>
               <span>{Math.max(0, limit - used).toLocaleString()} remaining</span>
-              {usageResetDate && (
-                <>
-                  <span>·</span>
-                  <span>Resets {fmtDate(usageResetDate)}</span>
-                </>
-              )}
+              <span>·</span>
+              <span>Resets {formatResetDate(usageResetsAt)}</span>
             </div>
           </div>
 

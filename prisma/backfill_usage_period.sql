@@ -1,48 +1,71 @@
 -- ─────────────────────────────────────────────────────────────────────
--- FIX 4A backfill: reset stale usage-period counters
+-- Backfill: calendar-month usage-period reset
 --
 -- Context
--- Before FIX 4A, `messagesUsedThisMonth` was reset only by the
+-- Previously, `messagesUsedThisMonth` was reset only by the
 -- `invoice.paid` Stripe webhook. That meant:
 --   * Free accounts (no invoices) never reset — throttled forever
 --   * Annual subscribers reset once/year instead of once/month
+-- Live evidence: a Free account showing "Resets June 9" in September
+-- with 451/500 sent, unable to send anything since June.
 --
--- After FIX 4A, `lib/usageCheck.ts#checkMessageLimit` lazily rolls
--- the period forward on every send attempt. Any user who sends will
--- self-heal on their next send.
+-- New behaviour (see lib/usageCheck.ts + lib/usagePeriod.ts):
+--   usagePeriodStart is the 00:00-UTC start of the CURRENT calendar
+--   month. Any account whose usagePeriodStart is in an earlier month
+--   is stale — the auto-roll in code will fix it on the next check
+--   or send, but this backfill fixes every account in one shot so
+--   admin views + dashboards show the correct number immediately.
 --
--- This SQL patches the two edge cases the lazy roll won't touch:
---   1. Accounts that will never send again but still show a stale
---      counter on the billing page.
---   2. Admin dashboards / analytics that read the counter directly.
---
--- Schema: the `usagePeriodStart` column already exists on `User`
--- (added in the initial schema with @default(now())). No DDL is
--- needed — this is data-only.
+-- Schema
+-- `usagePeriodStart` already exists on `User` (added in the initial
+-- schema, DateTime with @default(now())). This SQL is data-only —
+-- no DDL required.
 -- ─────────────────────────────────────────────────────────────────────
 
--- 1) Any account whose usage period is more than 30 days old:
---    zero the counter and roll usagePeriodStart forward to now.
---    Applies to every plan — even Pro subscribers who somehow ran
---    over their window should get a fresh cycle.
-UPDATE "User"
-SET
-  "messagesUsedThisMonth" = 0,
-  "usagePeriodStart" = NOW()
-WHERE
-  "usagePeriodStart" < NOW() - INTERVAL '30 days';
-
--- 2) Preview only — how many rows would we touch, and what do the
---    current-period-stale rows look like on Free specifically?
--- (Run before step 1 to see the blast radius.)
+-- Preview (run BEFORE step 2 to see the blast radius).
+--   * How many accounts have a stale period?
+--   * Which Free accounts are stuck with a non-zero counter?
 --
 -- SELECT COUNT(*) AS stale_users
 -- FROM "User"
--- WHERE "usagePeriodStart" < NOW() - INTERVAL '30 days';
+-- WHERE date_trunc('month', "usagePeriodStart" AT TIME ZONE 'UTC')
+--     < date_trunc('month', NOW() AT TIME ZONE 'UTC');
 --
 -- SELECT id, email, plan, "messagesUsedThisMonth", "usagePeriodStart"
 -- FROM "User"
 -- WHERE plan = 'free'
 --   AND "messagesUsedThisMonth" > 0
---   AND "usagePeriodStart" < NOW() - INTERVAL '30 days'
+--   AND date_trunc('month', "usagePeriodStart" AT TIME ZONE 'UTC')
+--     < date_trunc('month', NOW() AT TIME ZONE 'UTC')
 -- ORDER BY "usagePeriodStart" ASC;
+
+-- 1) Backfill every account so usagePeriodStart is the 00:00-UTC
+--    first-of-current-month. Idempotent — running it a second time
+--    is a no-op for accounts already on this month's boundary.
+--    Any account whose stored period is stale (last month or older)
+--    ALSO gets its counter zeroed in the same UPDATE, which fixes
+--    the June-451 Free account and any annual subscriber whose
+--    counter carried across months.
+--
+--    Split into two statements to keep the "reset counter" logic
+--    obvious. Postgres date_trunc gives us the calendar-month floor.
+UPDATE "User"
+SET
+  "messagesUsedThisMonth" = 0,
+  "usagePeriodStart"      = date_trunc('month', NOW() AT TIME ZONE 'UTC')
+                              AT TIME ZONE 'UTC'
+WHERE
+  date_trunc('month', "usagePeriodStart" AT TIME ZONE 'UTC')
+    < date_trunc('month', NOW() AT TIME ZONE 'UTC');
+
+-- 2) Normalize accounts that are already in the current month but
+--    have a non-midnight-UTC usagePeriodStart (e.g. an account
+--    created today at 14:37 UTC). Snap those to the 1st @ 00:00.
+--    The counter is preserved — this month's sends still count.
+UPDATE "User"
+SET
+  "usagePeriodStart" = date_trunc('month', NOW() AT TIME ZONE 'UTC')
+                         AT TIME ZONE 'UTC'
+WHERE
+  "usagePeriodStart" <> date_trunc('month', NOW() AT TIME ZONE 'UTC')
+                          AT TIME ZONE 'UTC';

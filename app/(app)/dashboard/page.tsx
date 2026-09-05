@@ -15,6 +15,7 @@ import { getPlan } from "@/lib/stripe";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { LandingPage } from "@/components/LandingPage";
 import { UsageMeter } from "@/components/billing/UsageMeter";
+import { ensureUsagePeriodCurrent } from "@/lib/usageCheck";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,14 @@ async function renderDashboard() {
     redirect("/onboarding");
   }
 
+  // Snap the usage counter to the current calendar month before we
+  // render anything that shows it. On a mid-month load this is a
+  // no-op; on the first load after a month boundary it zeroes the
+  // counter so the dashboard, usage meter, and "this period" tile
+  // all show the fresh number rather than last month's leftovers.
+  const rolled = await ensureUsagePeriodCurrent(user.id);
+  const displayedUsed = rolled?.used ?? user.messagesUsedThisMonth;
+
   const data = await loadDashboardData(user.id);
   const whatsappConnected = Boolean(
     user.whatsappApiToken && user.whatsappPhoneNumberId
@@ -109,11 +118,7 @@ async function renderDashboard() {
 
       <UnreadAlertsBanner />
 
-      <UsageMeter
-        plan={plan}
-        used={user.messagesUsedThisMonth}
-        resetsAt={user.currentPeriodEnd}
-      />
+      <UsageMeter plan={plan} used={displayedUsed} />
 
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
@@ -144,12 +149,12 @@ async function renderDashboard() {
             accent: "success",
           },
           {
-            // NEW tile: current-billing-period send count, reads the
+            // NEW tile: current-calendar-month send count, reads the
             // same messagesUsedThisMonth counter the billing page and
-            // plan-limit enforcement use. By definition matches the
-            // number in the billing usage meter.
+            // plan-limit enforcement use — post-roll, so it matches
+            // the usage meter above by construction.
             label: "Messages sent this period",
-            value: formatNumber(user.messagesUsedThisMonth),
+            value: formatNumber(displayedUsed),
           },
           {
             label: "Delivery Rate",

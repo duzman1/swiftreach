@@ -2,15 +2,23 @@
 // (sending a message, creating a template, exporting CSV, etc.). Limits live
 // in lib/stripe.ts PLANS; this file just consults them.
 //
-// USAGE PERIOD RESET (FIX 4A):
-//   messagesUsedThisMonth is NOT reset by Stripe events. It is reset
-//   lazily by rollUsagePeriodIfExpired() below on every send attempt.
-//   Rationale: Free accounts have no invoices, and annual subscribers
-//   only get invoice.paid once per year — a plan-independent monthly
-//   cycle is the only correct model.
+// USAGE PERIOD RESET:
+//   messagesUsedThisMonth is NOT reset by Stripe events. It resets on
+//   the 1st of every calendar month at 00:00 UTC for every account,
+//   regardless of plan, billing interval, or signup date.
+//
+//   The reset itself is lazy — rollUsagePeriodIfExpired() below runs
+//   at the top of every limit check AND every increment, so the
+//   counter is always current the moment anyone looks at it.
+//   Multi-month dormancy (e.g. account inactive since June, viewed
+//   in September) collapses to a single UPDATE — no per-month loop.
 
 import { prisma } from "./prisma";
 import { getPlanLimits, type PlanLimits } from "./stripe";
+import {
+  firstOfMonthUtc,
+  isUsagePeriodExpired,
+} from "./usagePeriod";
 
 // Plans that grant full send access. Access is decided by the `plan`
 // field on the user record ONLY — never by stripeSubscriptionStatus.
@@ -40,16 +48,25 @@ export interface BlockedResult {
 export type LimitCheckResult = AllowedResult | BlockedResult;
 
 /**
- * Roll the user's usage period forward by whole months until
- * usagePeriodStart is in the future (i.e. the current period covers
- * now). Zeroes messagesUsedThisMonth if any roll happened. Idempotent
- * — a no-op when the period is still current.
+ * Reset the message counter if the user's usage period is from an
+ * earlier calendar month (UTC). Idempotent — a no-op mid-month.
  *
- * Called at the top of every send-limit check so the counter is
- * accurate without any cron or webhook dependency.
+ * A single UPDATE handles any gap. Whether the account was dormant
+ * for a day or for a year, one call snaps usagePeriodStart to the
+ * first-of-this-month and zeroes the counter.
  *
- * Returns the fresh {used, periodStart} the caller should use.
+ * Called at the top of every limit check, every send-increment, and
+ * by the dashboard/billing pages before they display the counter —
+ * so no surface can show a stale "451 / 500" from a prior month.
+ *
+ * Returns the fresh values the caller should use.
  */
+export async function ensureUsagePeriodCurrent(
+  userId: string
+): Promise<{ used: number; periodStart: Date } | null> {
+  return rollUsagePeriodIfExpired(userId);
+}
+
 async function rollUsagePeriodIfExpired(
   userId: string
 ): Promise<{ used: number; periodStart: Date } | null> {
@@ -60,28 +77,16 @@ async function rollUsagePeriodIfExpired(
   if (!user) return null;
 
   const now = new Date();
-  const start = new Date(user.usagePeriodStart);
+  const currentStart = new Date(user.usagePeriodStart);
 
-  // Fast path: still inside the current month-window — nothing to do.
-  // "One month" is defined as calendar-month rolls (Jan 15 → Feb 15,
-  // Feb 15 → Mar 15, …). Handled by incrementing the month field.
-  const next = new Date(start);
-  next.setUTCMonth(next.getUTCMonth() + 1);
-  if (now < next) {
-    return { used: user.messagesUsedThisMonth, periodStart: start };
+  if (!isUsagePeriodExpired(currentStart, now)) {
+    return { used: user.messagesUsedThisMonth, periodStart: currentStart };
   }
 
-  // Roll forward. Advance by whole months until the next boundary is
-  // in the future, so a very-stale account (e.g. dormant for a year)
-  // lands on a current window, not on the first stale boundary.
-  const nextPeriodStart = new Date(start);
-  while (nextPeriodStart <= now) {
-    nextPeriodStart.setUTCMonth(nextPeriodStart.getUTCMonth() + 1);
-  }
-  // The new period STARTS one month before nextPeriodStart's next roll.
-  const rolledStart = new Date(nextPeriodStart);
-  rolledStart.setUTCMonth(rolledStart.getUTCMonth() - 1);
-
+  // Snap to the 00:00-UTC start of the current calendar month. This
+  // is the single source of truth for "which period are we in" —
+  // never Stripe's billing anniversary.
+  const rolledStart = firstOfMonthUtc(now);
   await prisma.user.update({
     where: { id: userId },
     data: {
@@ -204,11 +209,16 @@ export async function checkCsvExportAllowed(
   return { allowed: true, limit: 1, used: 0, remaining: 1 };
 }
 
-/** Increment the message counter — call after each successful send. */
+/**
+ * Increment the message counter — call after each successful send.
+ * Also rolls the period first so an increment can never land against
+ * a stale month.
+ */
 export async function incrementMessageUsage(
   userId: string,
   count = 1
 ): Promise<void> {
+  await rollUsagePeriodIfExpired(userId);
   await prisma.user.update({
     where: { id: userId },
     data: { messagesUsedThisMonth: { increment: count } },
@@ -218,17 +228,18 @@ export async function incrementMessageUsage(
 /**
  * Reset the monthly counter — admin override only.
  *
- * NO LONGER called by the Stripe webhook. Since FIX 4A the usage
- * period is plan-independent and rolls forward on every send attempt
- * (see rollUsagePeriodIfExpired above). Kept exported because the
- * admin user detail page uses it for manual "reset now" actions.
+ * NOT called by any Stripe webhook. Usage periods are calendar-month
+ * based (see rollUsagePeriodIfExpired above); this helper is kept
+ * exported for admin "reset now" actions. Snaps usagePeriodStart to
+ * the start of the current calendar month so the next auto-roll
+ * lines up naturally.
  */
 export async function resetMonthlyUsage(userId: string): Promise<void> {
   await prisma.user.update({
     where: { id: userId },
     data: {
       messagesUsedThisMonth: 0,
-      usagePeriodStart: new Date(),
+      usagePeriodStart: firstOfMonthUtc(new Date()),
     },
   });
 }
