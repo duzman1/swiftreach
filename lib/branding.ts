@@ -19,10 +19,48 @@ export interface Branding {
 }
 
 /**
- * Resolve the branding shape a report should render. Falls back to
- * safe defaults when the user hasn't set anything — so this can be
- * called for Free users too (they see the SwiftReach-branded preview
- * of what a Pro user would ship).
+ * Resolve the branding shape a report should render.
+ *
+ * Name precedence:
+ *   1. user.companyName (if set)
+ *   2. firstName + lastName (the account name)
+ *
+ * NO email-prefix fallback. A Pro user who skips branding setup
+ * shouldn't hand a client a report titled "onozied". Callers that
+ * face the network (the report route) must refuse to generate when
+ * this returns null via `resolveBrandingOrNull` — the Branding
+ * settings preview can render the placeholder shape from
+ * `previewBranding` instead.
+ */
+export function resolveBrandingOrNull(user: {
+  companyName: string | null;
+  logoUrl: string | null;
+  accentColor: string;
+  footerText: string | null;
+  hideSwiftReachBranding: boolean;
+  firstName: string | null;
+  lastName: string | null;
+}): Branding | null {
+  const nameFromFields = [user.firstName, user.lastName]
+    .filter((s) => s && s.trim())
+    .join(" ")
+    .trim();
+  const resolvedName = user.companyName?.trim() || nameFromFields;
+  if (!resolvedName) return null;
+  return {
+    companyName: resolvedName.slice(0, 120),
+    logoUrl: user.logoUrl?.trim() || null,
+    accentColor: isValidHex(user.accentColor) ? user.accentColor : DEFAULT_ACCENT,
+    footerText: user.footerText?.trim() || null,
+    hideSwiftReachBranding: user.hideSwiftReachBranding,
+  };
+}
+
+/**
+ * Same as resolveBrandingOrNull but with a "Your Company" placeholder
+ * for the settings-page live preview only. Never used by the report
+ * generator — that path uses resolveBrandingOrNull and refuses on
+ * null so a report can't ship with the placeholder name.
  */
 export function resolveBranding(user: {
   companyName: string | null;
@@ -32,20 +70,16 @@ export function resolveBranding(user: {
   hideSwiftReachBranding: boolean;
   firstName: string | null;
   lastName: string | null;
-  email: string;
 }): Branding {
-  const nameFromFields = [user.firstName, user.lastName]
-    .filter((s) => s && s.trim())
-    .join(" ")
-    .trim();
-  const fallbackName = nameFromFields || user.email.split("@")[0] || "SwiftReach";
-  return {
-    companyName: (user.companyName?.trim() || fallbackName).slice(0, 120),
-    logoUrl: user.logoUrl?.trim() || null,
-    accentColor: isValidHex(user.accentColor) ? user.accentColor : DEFAULT_ACCENT,
-    footerText: user.footerText?.trim() || null,
-    hideSwiftReachBranding: user.hideSwiftReachBranding,
-  };
+  return (
+    resolveBrandingOrNull(user) ?? {
+      companyName: "Your Company",
+      logoUrl: null,
+      accentColor: DEFAULT_ACCENT,
+      footerText: null,
+      hideSwiftReachBranding: false,
+    }
+  );
 }
 
 /** True if s is a #RRGGBB hex color. Never accepts #RGB shorthand,

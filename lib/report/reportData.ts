@@ -10,14 +10,18 @@
 // isn't built yet — the filter is here so adding it later is a
 // one-line prisma where clause change and nothing else.
 //
-// Delivery-rate definition matches the dashboard's all-time tile
-// EXACTLY: delivered / sent, computed from Contact rows. `sent` here
-// covers anything that left this app (status in {sent,delivered,read}),
-// mirroring lib/analytics.ts + app/api/analytics/summary/route.ts.
+// DELIVERY-RATE DEFINITION
+// Counted from Contact TIMESTAMPS, not status strings:
+//   sent      = Contact.sentAt IS NOT NULL
+//   delivered = Contact.deliveredAt IS NOT NULL
+//   failed    = Contact.status = 'failed'
+// This matches the dashboard's "Delivery rate (all time)" tile
+// exactly (see app/(app)/campaigns/[id]/page.tsx comment on why
+// status-based counting under-reports delivery — Meta's webhook can
+// set deliveredAt without advancing status past "sent").
 
 import { prisma } from "../prisma";
 
-/** ISO-in strings; ISO-out interior. Kept string for JSON parity. */
 export interface DateRange {
   start: Date;
   end: Date;
@@ -57,22 +61,39 @@ function rate(delivered: number, sent: number): number | null {
   return Math.round((delivered / sent) * 1000) / 10;
 }
 
-type StatusRow = { status: string; _count: { status: number } };
-
-function bucket(rows: StatusRow[]) {
-  const t: Record<string, number> = {
-    sent: 0, delivered: 0, read: 0, failed: 0,
-    skipped: 0, pending: 0, sending: 0, invalid: 0, limit_reached: 0,
+/** Per-campaign counts from Contact timestamps. Runs one indexed
+ *  count query per metric — cheap because Contact.campaignId is
+ *  indexed and each predicate is a single non-null check. */
+async function campaignCounts(campaignIds: string[]): Promise<
+  Map<string, { sent: number; delivered: number; failed: number }>
+> {
+  if (campaignIds.length === 0) return new Map();
+  const [sent, delivered, failed] = await Promise.all([
+    prisma.contact.groupBy({
+      by: ["campaignId"],
+      where: { campaignId: { in: campaignIds }, sentAt: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.contact.groupBy({
+      by: ["campaignId"],
+      where: { campaignId: { in: campaignIds }, deliveredAt: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.contact.groupBy({
+      by: ["campaignId"],
+      where: { campaignId: { in: campaignIds }, status: "failed" },
+      _count: { _all: true },
+    }),
+  ]);
+  const map = new Map<string, { sent: number; delivered: number; failed: number }>();
+  const seed = (cid: string) => {
+    if (!map.has(cid)) map.set(cid, { sent: 0, delivered: 0, failed: 0 });
+    return map.get(cid)!;
   };
-  for (const r of rows) t[r.status] = r._count.status;
-  // "sent" upstream = anything that left the app (sent | delivered | read).
-  // "delivered" upstream = delivered | read (a read message was also delivered).
-  return {
-    sentTotal: t.sent + t.delivered + t.read,
-    deliveredTotal: t.delivered + t.read,
-    failedTotal: t.failed,
-    skipped: t.skipped,
-  };
+  for (const r of sent) seed(r.campaignId).sent = r._count._all;
+  for (const r of delivered) seed(r.campaignId).delivered = r._count._all;
+  for (const r of failed) seed(r.campaignId).failed = r._count._all;
+  return map;
 }
 
 async function optOutCount(
@@ -96,21 +117,17 @@ export async function loadCampaignReport(
   });
   if (!campaign) return null;
 
-  const grouped = await prisma.contact.groupBy({
-    by: ["status"],
-    where: { campaignId },
-    _count: { status: true },
-  });
-  const b = bucket(grouped);
+  const counts = await campaignCounts([campaign.id]);
+  const c = counts.get(campaign.id) ?? { sent: 0, delivered: 0, failed: 0 };
   const row: ReportCampaignRow = {
     id: campaign.id,
     name: campaign.name,
     createdAt: campaign.createdAt,
     totalCount: campaign.totalCount,
-    sent: b.sentTotal,
-    delivered: b.deliveredTotal,
-    failed: b.failedTotal,
-    deliveryRatePct: rate(b.deliveredTotal, b.sentTotal),
+    sent: c.sent,
+    delivered: c.delivered,
+    failed: c.failed,
+    deliveryRatePct: rate(c.delivered, c.sent),
   };
 
   return {
@@ -119,11 +136,11 @@ export async function loadCampaignReport(
     campaign: { id: campaign.id, name: campaign.name, createdAt: campaign.createdAt },
     summary: {
       campaigns: 1,
-      messagesSent: b.sentTotal,
-      delivered: b.deliveredTotal,
-      failed: b.failedTotal,
+      messagesSent: c.sent,
+      delivered: c.delivered,
+      failed: c.failed,
       optOuts: 0, // opt-outs only surface on range reports
-      deliveryRatePct: rate(b.deliveredTotal, b.sentTotal),
+      deliveryRatePct: rate(c.delivered, c.sent),
     },
     rows: [row],
   };
@@ -147,38 +164,25 @@ export async function loadRangeReport(
     orderBy: { createdAt: "desc" },
   });
 
+  const counts = await campaignCounts(campaigns.map((c) => c.id));
+
   const rows: ReportCampaignRow[] = [];
   let sSent = 0, sDelivered = 0, sFailed = 0;
-
-  if (campaigns.length > 0) {
-    const perCampaign = await prisma.contact.groupBy({
-      by: ["campaignId", "status"],
-      where: { campaignId: { in: campaigns.map((c) => c.id) } },
-      _count: { status: true },
+  for (const c of campaigns) {
+    const cc = counts.get(c.id) ?? { sent: 0, delivered: 0, failed: 0 };
+    sSent += cc.sent;
+    sDelivered += cc.delivered;
+    sFailed += cc.failed;
+    rows.push({
+      id: c.id,
+      name: c.name,
+      createdAt: c.createdAt,
+      totalCount: c.totalCount,
+      sent: cc.sent,
+      delivered: cc.delivered,
+      failed: cc.failed,
+      deliveryRatePct: rate(cc.delivered, cc.sent),
     });
-    // Bucket into per-campaign totals.
-    const byCid = new Map<string, StatusRow[]>();
-    for (const r of perCampaign) {
-      const list = byCid.get(r.campaignId) ?? [];
-      list.push({ status: r.status, _count: { status: r._count.status } });
-      byCid.set(r.campaignId, list);
-    }
-    for (const c of campaigns) {
-      const b = bucket(byCid.get(c.id) ?? []);
-      sSent += b.sentTotal;
-      sDelivered += b.deliveredTotal;
-      sFailed += b.failedTotal;
-      rows.push({
-        id: c.id,
-        name: c.name,
-        createdAt: c.createdAt,
-        totalCount: c.totalCount,
-        sent: b.sentTotal,
-        delivered: b.deliveredTotal,
-        failed: b.failedTotal,
-        deliveryRatePct: rate(b.deliveredTotal, b.sentTotal),
-      });
-    }
   }
 
   const optOuts = await optOutCount(userId, range);

@@ -18,7 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { handleApiError, errorResponse } from "@/lib/apiResponse";
 import { requireFeature } from "@/lib/planGate";
-import { resolveBranding, companySlug } from "@/lib/branding";
+import { resolveBrandingOrNull, companySlug } from "@/lib/branding";
 import {
   loadCampaignReport,
   loadRangeReport,
@@ -76,7 +76,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const branding = resolveBranding(user);
+    // Refuse to generate if the user has no real company name AND no
+    // firstName+lastName on their account. Client-facing PDFs must
+    // never ship with a placeholder — the alternative was defaulting
+    // to the email local-part, which would title a report "onozied".
+    const branding = resolveBrandingOrNull(user);
+    if (!branding) {
+      return errorResponse(
+        "Set a company name in Settings → Branding before generating a report.",
+        400,
+        { missing: "companyName" }
+      );
+    }
     // Timezone: fall back to defaults from the User record, then UTC.
     // We don't currently store a per-user timezone (defaultCountryCode
     // is the closest thing) — using UTC keeps generated times honest
