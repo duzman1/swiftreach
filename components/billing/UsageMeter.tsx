@@ -27,10 +27,16 @@ function fmtDate(d: Date | null): string {
 export function UsageMeter({ plan, used, resetsAt }: Props) {
   const limit = plan.limits.messagesPerMonth;
   const remaining = Math.max(0, limit - used);
-  const percent =
+  // Same split as the billing page: `percent` (integer) drives the
+  // bar width + color-band bucketing; `percentLabel` handles the
+  // "<1%" case so 451 / 100,000 doesn't render as "0% used".
+  const rawPercent =
     limit > 0 && Number.isFinite(limit)
-      ? Math.min(100, Math.round((used / limit) * 100))
+      ? Math.min(100, (used / limit) * 100)
       : 0;
+  const percent = Math.round(rawPercent);
+  const percentLabel =
+    rawPercent === 0 ? "0%" : rawPercent < 1 ? "<1%" : `${percent}%`;
   const isFree = plan.id === "free";
   const isStarter = plan.id === "starter";
   const showUpgradeLink = isFree || isStarter;
@@ -78,7 +84,7 @@ export function UsageMeter({ plan, used, resetsAt }: Props) {
           {Number.isFinite(limit) ? limit.toLocaleString() : "∞"}
         </span>
         <span>·</span>
-        <span>{percent}% used</span>
+        <span>{percentLabel} used</span>
         <span>·</span>
         <span>{remaining.toLocaleString()} remaining</span>
       </div>

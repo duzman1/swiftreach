@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   getPreviousPlan,
   getLimit,
+  isAtOrAbove,
   type PlanId,
   type BillingInterval,
   type Plan,
@@ -65,6 +66,7 @@ export function PlanComparison({
     currentInterval || "month"
   );
   const [busyPlan, setBusyPlan] = React.useState<PlanId | null>(null);
+  const [portalBusy, setPortalBusy] = React.useState(false);
 
   async function upgrade(planId: PlanId) {
     setBusyPlan(planId);
@@ -84,6 +86,26 @@ export function PlanComparison({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Network error");
       setBusyPlan(null);
+    }
+  }
+
+  // Downgrades never create a new checkout session — they must go
+  // through the Stripe Customer Portal so Stripe handles proration,
+  // period-end scheduling, and the "you keep access until X" copy.
+  async function openBillingPortal() {
+    setPortalBusy(true);
+    try {
+      const res = await fetch("/api/billing/create-portal", { method: "POST" });
+      const data = await res.json();
+      if (data.ok && data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error(data.error ?? "Could not open billing portal");
+        setPortalBusy(false);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error");
+      setPortalBusy(false);
     }
   }
 
@@ -132,7 +154,16 @@ export function PlanComparison({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {plans.map((p) => {
           const isCurrent = p.id === currentPlan;
-          const isHighlighted = p.id === HIGHLIGHTED;
+          // Direction of movement from the user's current plan:
+          //   isUpgrade   — this card is above current (Upgrade CTA)
+          //   isDowngrade — this card is below current (Downgrade CTA,
+          //                 routed through Stripe billing portal)
+          const isUpgrade = !isCurrent && isAtOrAbove(p.id, currentPlan);
+          const isDowngrade = !isCurrent && !isAtOrAbove(p.id, currentPlan);
+          // Suppress "Most popular" if the user is already above the
+          // highlighted tier — no point pushing Growth to a Pro user.
+          const isHighlighted =
+            p.id === HIGHLIGHTED && !isAtOrAbove(currentPlan, HIGHLIGHTED);
           const priceId =
             interval === "year" ? p.stripeAnnualPriceId : p.stripeMonthlyPriceId;
           const priceConfigured = p.id === "free" || !!priceId;
@@ -204,20 +235,44 @@ export function PlanComparison({
               {/* CTA — pinned to the bottom of the card via the ul's
                   flex-1 above + this mt-6. All cards share the same
                   Button h-10 (or an h-10 spacer div for the "paid user
-                  looking at Free card" case) so bottom edges align. */}
+                  looking at Free card" case) so bottom edges align.
+                  Direction:
+                    - isCurrent    → 'Current plan' (disabled)
+                    - Free card,
+                      user is paid → invisible spacer (downgrade to
+                                     free goes through Stripe portal;
+                                     see billing.page footer link)
+                    - isDowngrade  → 'Downgrade to X', outline styling,
+                                     opens Stripe billing portal
+                    - isUpgrade    → 'Upgrade to X', primary styling
+                                     (unless we suppress highlight),
+                                     starts a new checkout session */}
               <div className="mt-6">
                 {isCurrent ? (
                   <Button variant="outline" disabled className="w-full">
                     Current plan
                   </Button>
                 ) : p.id === "free" ? (
-                  // Paid user viewing the Free card: no CTA (downgrades
-                  // go through the Stripe billing portal), but preserve
-                  // the vertical space so all cards align.
                   <div className="h-10" aria-hidden="true" />
                 ) : !priceConfigured ? (
                   <Button variant="outline" disabled className="w-full">
                     Coming soon
+                  </Button>
+                ) : isDowngrade ? (
+                  <Button
+                    onClick={openBillingPortal}
+                    disabled={portalBusy || busyPlan !== null}
+                    variant="outline"
+                    className="w-full gap-2"
+                  >
+                    {portalBusy ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Opening portal…
+                      </>
+                    ) : (
+                      <>Downgrade to {p.name}</>
+                    )}
                   </Button>
                 ) : (
                   <Button

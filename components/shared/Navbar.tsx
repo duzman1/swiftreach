@@ -26,6 +26,7 @@ import {
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { PlanBadge } from "./PlanBadge";
+import { isAtOrAbove } from "@/lib/plans";
 
 type NavItem = {
   href: string;
@@ -69,11 +70,19 @@ const SECTIONS: { items: NavItem[] }[] = [
 ];
 
 interface BillingStatus {
-  plan: "free" | "starter" | "growth";
+  // Accept any string here — the source of truth for plan ids is
+  // lib/plans.ts; the isAtOrAbove() helper below normalizes unknown
+  // plans to "free" so a stale/missing value never gives false-positive
+  // access.
+  plan: string;
 }
 
-function isPaid(plan: BillingStatus["plan"] | null): boolean {
-  return plan === "starter" || plan === "growth";
+// "paidOnly" nav items unlock at Starter and above. Routed through
+// isAtOrAbove() from lib/plans.ts so this stays correct when new
+// tiers are added, and so Pro users don't get false-negative locks.
+// Never inspects stripeSubscriptionStatus.
+function isPaid(plan: string | null): boolean {
+  return isAtOrAbove(plan, "starter");
 }
 
 function useInboxUnread(enabled: boolean): number {

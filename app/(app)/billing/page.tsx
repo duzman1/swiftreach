@@ -133,7 +133,18 @@ export default async function BillingPage({
   const featureMessage = FEATURE_MESSAGES[featureKey] ?? null;
   const used = user.messagesUsedThisMonth;
   const limit = plan.limits.messagesPerMonth;
-  const percent = limit > 0 && Number.isFinite(limit) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  // Two numbers: `percent` is an integer used for the bar width +
+  // color-band bucketing; `percentLabel` is the human-readable string
+  // for the "% used" text, which shows "<1%" for any non-zero value
+  // below one percent so users on huge plans (e.g. Pro's 100k cap)
+  // don't see "0% used" when they've actually sent hundreds.
+  const rawPercent =
+    limit > 0 && Number.isFinite(limit)
+      ? Math.min(100, (used / limit) * 100)
+      : 0;
+  const percent = Math.round(rawPercent);
+  const percentLabel =
+    rawPercent === 0 ? "0%" : rawPercent < 1 ? "<1%" : `${percent}%`;
 
   // New-shape plan objects sourced directly from lib/plans.ts. The
   // PlanComparison component handles the monthly/annual toggle and
@@ -229,7 +240,7 @@ export default async function BillingPage({
               />
             </div>
             <div className="text-xs text-muted-foreground mt-1.5 flex flex-wrap items-center gap-3">
-              <span>{percent}% used</span>
+              <span>{percentLabel} used</span>
               <span>·</span>
               <span>{Math.max(0, limit - used).toLocaleString()} remaining</span>
               {user.currentPeriodEnd && (
