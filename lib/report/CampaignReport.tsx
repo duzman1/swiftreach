@@ -20,26 +20,16 @@ import {
   View,
   Image,
   StyleSheet,
-  Font,
 } from "@react-pdf/renderer";
 import type { Branding } from "../branding";
 import type { ReportData } from "./reportData";
 
-// Register a friendlier body face than react-pdf's default (Helvetica).
-// The URL must be reachable at render time — cdnjs is on the CSP list
-// for other artifacts, but here we run server-side, so any HTTP mirror
-// is fine. Falling back silently to Helvetica is acceptable if fetch
-// fails; we don't gate render on this.
-try {
-  Font.register({
-    family: "Inter",
-    fonts: [
-      { src: "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMa1ZL7.ttf", fontWeight: 400 },
-      { src: "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMa2JL7SUc.ttf", fontWeight: 600 },
-      { src: "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMa1pL7SUc.ttf", fontWeight: 700 },
-    ],
-  });
-} catch { /* leave the default */ }
+// Uses pdfkit's bundled Helvetica (the default). We used to register
+// Inter from Google Fonts server-side but Vercel's serverless
+// runtime can't always fetch it at render time — cold-start
+// networking is restricted and any failure blocks the whole
+// render. Helvetica is a clean, well-metricked face for a report
+// like this and ships with pdfkit at zero cost.
 
 interface Props {
   data: ReportData;
@@ -88,7 +78,7 @@ function styles(accent: string) {
       paddingTop: 40,
       paddingHorizontal: 36,
       paddingBottom: 48, // leave room for footer
-      fontFamily: "Inter",
+      fontFamily: "Helvetica",
       fontSize: 10,
       color: INK,
     },

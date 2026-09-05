@@ -22,6 +22,20 @@ const nextConfig = {
   // correctly at runtime.
   experimental: {
     serverComponentsExternalPackages: ["@prisma/client"],
+    // @react-pdf/renderer uses pdfkit under the hood, which lazily
+    // requires font .cjs files at render time via computed paths.
+    // Next's tracer can't see those requires and drops the files
+    // from the serverless bundle, causing runtime "Cannot find
+    // module .../standard-fonts/Helvetica.cjs" (and friends) on
+    // Vercel. Include the whole pdfkit/fontkit tree so every lazy
+    // require resolves. Note the leading slash: the key is the URL
+    // path of the API route.
+    outputFileTracingIncludes: {
+      "/api/reports/generate": [
+        "./node_modules/pdfkit/**/*",
+        "./node_modules/fontkit/**/*",
+      ],
+    },
   },
 
   async headers() {
