@@ -12,6 +12,9 @@ import { handleApiError, errorResponse } from "@/lib/apiResponse";
 import { normalizePhone, isValidPhone } from "@/lib/phoneUtils";
 import { parseDateToMonthDay } from "@/lib/dateUtils";
 import { getAutomationCapacity } from "@/lib/automationLimits";
+import { hasFeature } from "@/lib/plans";
+import { classifyAutomationsForPlan } from "@/lib/automationEngine";
+import { checkMessageLimit } from "@/lib/usageCheck";
 import type { VariableMapping } from "@/lib/whatsapp";
 
 export const dynamic = "force-dynamic";
@@ -45,9 +48,43 @@ export async function GET() {
       },
     });
     const capacity = await getAutomationCapacity(user.id, user.plan);
+
+    // Derived block state — computed at read time so it clears
+    // automatically on plan upgrade or on the 1st of next month.
+    // The engine uses classifyAutomationsForPlan too, so the UI and
+    // the daily runner agree on what "blocked" means.
+    // - type_gated:        Starter/Free with a birthday/anniversary
+    // - over_count_cap:    beyond the plan's automation cap (post
+    //                      downgrade, deterministic keep-oldest)
+    // - over_message_limit: owner's messagesUsedThisMonth is at cap
+    // Order matters: type/count block from firing at all; the
+    // message-limit block affects everyone else uniformly.
+    const nonArchived = automations.filter((a) => a.status !== "archived");
+    const verdict = classifyAutomationsForPlan(nonArchived, user.plan);
+    const limitCheck = await checkMessageLimit(user.id, 1);
+    const messageLimitReached = !limitCheck.allowed && !!limitCheck.upgradeRequired;
+
+    const withState = automations.map((a) => {
+      let blockReason: string | null = verdict.get(a.id) ?? null;
+      if (!blockReason && a.status === "active" && messageLimitReached) {
+        blockReason = "over_message_limit";
+      }
+      // Copy for the "Paused — <reason>" pill in the UI. Kept in
+      // the route so the client stays dumb about plan tiers.
+      let blockReasonCopy: string | null = null;
+      if (blockReason === "type_gated") {
+        blockReasonCopy = "Requires Growth plan";
+      } else if (blockReason === "over_count_cap") {
+        blockReasonCopy = `Over ${user.plan} automation cap`;
+      } else if (blockReason === "over_message_limit") {
+        blockReasonCopy = "Monthly message limit reached";
+      }
+      return { ...a, blockReason, blockReasonCopy };
+    });
+
     return NextResponse.json({
       ok: true,
-      automations,
+      automations: withState,
       capacity: {
         plan: capacity.plan,
         limit:
@@ -75,13 +112,25 @@ export async function POST(req: NextRequest) {
         return errorResponse(
           "Automations require a paid plan. Upgrade at swiftreach.app/billing",
           403,
-          { upgradeRequired: true, plan: user.plan }
+          {
+            upgradeRequired: true,
+            plan: user.plan,
+            requiredPlan: "starter",
+          }
         );
       }
+      // Over their per-plan count cap. The next tier (growth for
+      // starter, pro for growth) is what unlocks more.
+      const nextTier = user.plan === "starter" ? "growth" : "pro";
       return errorResponse(
         `Your ${user.plan} plan allows up to ${capacity.limit} automation${capacity.limit === 1 ? "" : "s"}. Archive an existing one or upgrade your plan.`,
         403,
-        { plan: user.plan, limit: capacity.limit }
+        {
+          upgradeRequired: true,
+          plan: user.plan,
+          requiredPlan: nextTier,
+          limit: capacity.limit,
+        }
       );
     }
 
@@ -99,6 +148,24 @@ export async function POST(req: NextRequest) {
       body.type !== "custom_date"
     ) {
       return errorResponse("Invalid type", 400);
+    }
+    // Per-type gate: birthday & anniversary require Growth or above.
+    // custom_date stays available inside the existing count cap so
+    // Starter accounts can still use renewal reminders etc.
+    if (
+      (body.type === "birthday" || body.type === "anniversary") &&
+      !hasFeature(user.plan, "birthdayAutomations")
+    ) {
+      return errorResponse(
+        "Birthday and anniversary automations require Growth or above. Upgrade at swiftreach.app/billing.",
+        403,
+        {
+          upgradeRequired: true,
+          plan: user.plan,
+          requiredPlan: "growth",
+          feature: "birthdayAutomations",
+        }
+      );
     }
     if (body.mode !== "freeform" && body.mode !== "template") {
       return errorResponse("Invalid mode", 400);

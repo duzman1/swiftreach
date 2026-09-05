@@ -35,7 +35,8 @@ export type FeatureKey =
   | "savedAudiences"
   | "whiteLabelReports"
   | "clientWorkspaces"
-  | "customOnboarding";
+  | "customOnboarding"
+  | "birthdayAutomations";
 
 // null means "unlimited" throughout.
 export interface PlanLimitsV2 {
@@ -99,6 +100,7 @@ export const PLANS: Record<PlanId, Plan> = {
       whiteLabelReports: false,
       clientWorkspaces: false,
       customOnboarding: false,
+      birthdayAutomations: false,
     },
     supportSla: "Community support",
   },
@@ -128,6 +130,7 @@ export const PLANS: Record<PlanId, Plan> = {
       whiteLabelReports: false,
       clientWorkspaces: false,
       customOnboarding: false,
+      birthdayAutomations: false,
     },
     supportSla: "24-hour email support",
   },
@@ -157,6 +160,7 @@ export const PLANS: Record<PlanId, Plan> = {
       whiteLabelReports: false,
       clientWorkspaces: false,
       customOnboarding: false,
+      birthdayAutomations: true,
     },
     supportSla: "12-hour priority support",
   },
@@ -186,6 +190,7 @@ export const PLANS: Record<PlanId, Plan> = {
       whiteLabelReports: true,
       clientWorkspaces: true,
       customOnboarding: true,
+      birthdayAutomations: true,
     },
     supportSla: "4-hour priority support",
   },

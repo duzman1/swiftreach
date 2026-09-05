@@ -5,13 +5,18 @@
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Sparkles, Plus } from "lucide-react";
+import { Sparkles, Plus, Lock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { getAutomationCapacity } from "@/lib/automationLimits";
 import { formatMonthDay } from "@/lib/dateUtils";
 import { AutomationRowActions } from "@/components/automations/AutomationRowActions";
 import { Button } from "@/components/ui/button";
+import {
+  classifyAutomationsForPlan,
+  type AutomationBlockReason,
+} from "@/lib/automationEngine";
+import { checkMessageLimit } from "@/lib/usageCheck";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +27,7 @@ export default async function AutomationsPage() {
     redirect("/onboarding");
   }
 
-  const [automations, capacity] = await Promise.all([
+  const [automations, capacity, limitCheck] = await Promise.all([
     prisma.automation.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
@@ -31,7 +36,26 @@ export default async function AutomationsPage() {
       },
     }),
     getAutomationCapacity(user.id, user.plan),
+    checkMessageLimit(user.id, 1),
   ]);
+
+  // Derived block state — kept out of the DB so it clears
+  // automatically on plan upgrade or on the calendar-month reset.
+  // Same logic the engine uses in runDailyAutomations, so what the
+  // user sees here matches what actually fires.
+  const nonArchived = automations.filter((a) => a.status !== "archived");
+  const verdict = classifyAutomationsForPlan(nonArchived, user.plan);
+  const messageLimitReached =
+    !limitCheck.allowed && !!limitCheck.upgradeRequired;
+  const blockOf = (
+    id: string,
+    status: string
+  ): AutomationBlockReason | null => {
+    const planBlock = verdict.get(id) ?? null;
+    if (planBlock) return planBlock;
+    if (status === "active" && messageLimitReached) return "over_message_limit";
+    return null;
+  };
 
   const hasAny = automations.length > 0;
 
@@ -98,6 +122,7 @@ export default async function AutomationsPage() {
                   ? "💍"
                   : "📅";
             const contactCount = a._count.contacts;
+            const block = blockOf(a.id, a.status);
             return (
               <div
                 key={a.id}
@@ -113,7 +138,11 @@ export default async function AutomationsPage() {
                       >
                         {a.name}
                       </Link>
-                      <StatusPill status={a.status} />
+                      {block ? (
+                        <BlockedPill reason={block} />
+                      ) : (
+                        <StatusPill status={a.status} />
+                      )}
                     </div>
                     <div className="mt-1 text-sm text-zinc-600">
                       {contactCount} contact
@@ -121,18 +150,34 @@ export default async function AutomationsPage() {
                       {formatSendTime(a.sendHour, a.sendMinute)} ·{" "}
                       {a.type.replace("_", " ")}
                     </div>
-                    <div className="mt-0.5 text-xs text-zinc-500">
-                      {a.lastRunAt ? (
-                        <>
-                          Last run:{" "}
-                          {new Date(a.lastRunAt).toLocaleDateString()} ·{" "}
-                          {a.totalSent} message
-                          {a.totalSent === 1 ? "" : "s"} sent all-time
-                        </>
-                      ) : (
-                        <>Awaiting first matching date</>
-                      )}
-                    </div>
+                    {block ? (
+                      <div className="mt-1 text-xs text-amber-800 flex items-start gap-1.5">
+                        <Lock className="w-3 h-3 mt-[3px] shrink-0" />
+                        <span>
+                          {blockReasonLine(block)}{" "}
+                          <Link
+                            href="/billing"
+                            className="underline hover:text-amber-900"
+                          >
+                            Upgrade
+                          </Link>{" "}
+                          to resume.
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-0.5 text-xs text-zinc-500">
+                        {a.lastRunAt ? (
+                          <>
+                            Last run:{" "}
+                            {new Date(a.lastRunAt).toLocaleDateString()} ·{" "}
+                            {a.totalSent} message
+                            {a.totalSent === 1 ? "" : "s"} sent all-time
+                          </>
+                        ) : (
+                          <>Awaiting first matching date</>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <AutomationRowActions
@@ -187,6 +232,37 @@ function CreateCta({
       </Link>
     </div>
   );
+}
+
+// Rendered in place of StatusPill when derived block-state is set.
+// The DB row stays status="active" — this pill is purely a read-time
+// signal so it clears the moment the user upgrades or the calendar
+// month rolls over.
+function BlockedPill({ reason }: { reason: AutomationBlockReason }) {
+  const shortLabel: Record<AutomationBlockReason, string> = {
+    type_gated: "Paused — requires Growth",
+    over_count_cap: "Paused — over plan cap",
+    over_message_limit: "Paused — message limit",
+  };
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] uppercase tracking-wide bg-amber-50 text-amber-800 border-amber-200">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+      {shortLabel[reason]}
+    </span>
+  );
+}
+
+// Full-sentence copy shown under the card. Kept next to BlockedPill
+// so a new block-reason only needs its copy defined in one place.
+function blockReasonLine(reason: AutomationBlockReason): string {
+  switch (reason) {
+    case "type_gated":
+      return "Birthday and anniversary automations require Growth.";
+    case "over_count_cap":
+      return "This automation is over your current plan's cap and won't run.";
+    case "over_message_limit":
+      return "Your monthly message limit is reached — resets on the 1st.";
+  }
 }
 
 function StatusPill({ status }: { status: string }) {

@@ -66,6 +66,11 @@ const FEATURE_ROWS: Array<{
   { key: "campaignHistory", label: "Campaign history", kind: "limit-history" },
   { key: "inbox", label: "Inbox", kind: "always-on" },
   { key: "automations", label: "Automations", kind: "limit-automations" },
+  {
+    key: "birthdayAutomations",
+    label: "Birthday & anniversary messages",
+    kind: "feature",
+  },
   { key: "apiKeys", label: "API keys", kind: "limit-api-keys" },
   { key: "csvExport", label: "CSV export", kind: "feature" },
   { key: "googleDriveImport", label: "Google Drive import", kind: "feature" },
