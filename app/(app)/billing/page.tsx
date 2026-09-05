@@ -37,15 +37,39 @@ function fmtDate(d: Date | null | undefined): string {
   });
 }
 
-function pickStatusBadge(
-  plan: PlanId,
-  status: string | null,
-  cancelAtPeriodEnd: boolean,
-  periodEnd: Date | null
-) {
-  if (plan === "free") {
-    return <Badge variant="secondary">Free</Badge>;
+/**
+ * Badge next to the plan name.
+ *
+ * The Stripe-driven variants (Active / Cancels / Payment Failed) may
+ * ONLY render when a live Stripe subscription actually exists. For
+ * accounts without one — free users, admin comps, beta users, any
+ * plan set manually in the DB — we render a plain plan-name pill.
+ * Stripe-derived fields (currentPeriodEnd, stripeSubscriptionStatus)
+ * can carry leftover values from a prior subscription and must not
+ * be trusted when stripeSubscriptionId is null.
+ */
+function pickStatusBadge({
+  planId,
+  planName,
+  hasLiveSubscription,
+  status,
+  cancelAtPeriodEnd,
+  periodEnd,
+}: {
+  planId: PlanId;
+  planName: string;
+  hasLiveSubscription: boolean;
+  status: string | null;
+  cancelAtPeriodEnd: boolean;
+  periodEnd: Date | null;
+}) {
+  // No live subscription — badge is the plan name only. Nothing
+  // Stripe-derived may leak into this branch.
+  if (!hasLiveSubscription) {
+    if (planId === "free") return <Badge variant="secondary">Free</Badge>;
+    return <Badge variant="secondary">{planName}</Badge>;
   }
+
   if (cancelAtPeriodEnd) {
     return (
       <Badge variant="warning">
@@ -68,34 +92,30 @@ function pickStatusBadge(
 /**
  * One-line plan status under the title.
  *
- * FREE is short-circuited FIRST. Nothing else on this row may render
- * for a Free account, because a downgraded account can carry stale
- * Stripe fields (stripeSubscriptionStatus, currentPeriodEnd) from
- * its previous paid subscription, and rendering "Renews <date>" from
- * those would lie — there's no live subscription to renew from.
- *
- * Paid plans fall through to the Stripe-driven branches:
- *   - past_due → red, action-required copy
- *   - cancelAtPeriodEnd → amber, winding-down copy
- *   - active | trialing → muted, "Renews [date]" (Stripe date)
+ * Keyed on hasLiveSubscription, NOT on plan. Any account without a
+ * live Stripe subscription (free plan OR any manually-set paid
+ * plan) shows the calendar-month usage reset date and nothing else.
+ * Stripe-derived branches may only fire when a live subscription
+ * is authoritative — currentPeriodEnd and stripeSubscriptionStatus
+ * survive cancellation and downgrade, so they can carry stale
+ * values that would lie if we rendered them here.
  */
 function SubscriptionStatusLine({
-  plan,
+  hasLiveSubscription,
   status,
   cancelAtPeriodEnd,
   currentPeriodEnd,
   usageResetsAt,
 }: {
-  plan: PlanId;
+  hasLiveSubscription: boolean;
   status: string | null;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: Date | null;
   usageResetsAt: Date;
 }) {
-  // Free — no Stripe subscription is authoritative. Show the
-  // calendar-month usage reset here (paid plans get their reset
-  // date from the usage meter below).
-  if (plan === "free") {
+  // No Stripe subscription — show only the calendar-month reset.
+  // This covers free users and every admin/beta/comped paid account.
+  if (!hasLiveSubscription) {
     return (
       <p className="text-sm text-muted-foreground mt-1">
         Usage resets {formatResetDate(usageResetsAt)}
@@ -177,6 +197,15 @@ export default async function BillingPage({
   // 00:00 UTC, plan-independent. See lib/usagePeriod.ts.
   const usageResetsAt = firstOfNextMonthUtc();
 
+  // Presence of a live Stripe subscription — the ONLY authority for
+  // subscription-shaped UI (Active badge, "Renews" line, Manage
+  // Subscription button, comparison-table "Manage billing" link).
+  // stripeCustomerId is not sufficient: it survives cancellation and
+  // downgrade. stripeSubscriptionId is nulled by the webhook when
+  // the sub actually ends. Access to features never checks this —
+  // that stays on the `plan` field alone (see lib/plans.ts).
+  const hasLiveSubscription = Boolean(user.stripeSubscriptionId);
+
   // Color the bar based on usage band.
   const bandClass =
     percent >= 90 ? "bg-red-500" : percent >= 75 ? "bg-amber-500" : "bg-whatsapp";
@@ -223,18 +252,20 @@ export default async function BillingPage({
                 </>
               )}
             </span>
-            {pickStatusBadge(
-              plan.id,
-              user.stripeSubscriptionStatus,
-              user.cancelAtPeriodEnd,
-              user.currentPeriodEnd
-            )}
+            {pickStatusBadge({
+              planId: plan.id,
+              planName: plan.name,
+              hasLiveSubscription,
+              status: user.stripeSubscriptionStatus,
+              cancelAtPeriodEnd: user.cancelAtPeriodEnd,
+              periodEnd: user.currentPeriodEnd,
+            })}
           </CardTitle>
           {/* Prominent status line right under the badge. Color encodes state:
               past_due → red (action required), cancelAtPeriodEnd → amber
               (winding down), active → muted (informational). */}
           <SubscriptionStatusLine
-            plan={plan.id}
+            hasLiveSubscription={hasLiveSubscription}
             status={user.stripeSubscriptionStatus}
             cancelAtPeriodEnd={user.cancelAtPeriodEnd}
             currentPeriodEnd={user.currentPeriodEnd}
@@ -273,9 +304,10 @@ export default async function BillingPage({
             </div>
           </div>
 
-          {/* Manage Subscription only for paid plans with a Stripe
-              customer — Free has nothing to manage. */}
-          {plan.id !== "free" && user.stripeCustomerId && (
+          {/* Manage Subscription only when a LIVE Stripe subscription
+              exists. A leftover stripeCustomerId from a prior sub is
+              not enough — the portal has nothing to manage there. */}
+          {hasLiveSubscription && (
             <div className="pt-2 border-t flex flex-wrap gap-2">
               <PortalButton
                 label={
@@ -299,7 +331,7 @@ export default async function BillingPage({
         <PlanComparison
           currentPlan={plan.id}
           currentInterval={currentInterval}
-          hasBillingAccount={plan.id !== "free" && Boolean(user.stripeCustomerId)}
+          hasBillingAccount={hasLiveSubscription}
           plans={planCards}
         />
       </div>
