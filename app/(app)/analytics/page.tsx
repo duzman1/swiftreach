@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Heatmap } from "@/components/analytics/Heatmap";
+import { DownloadReportButton } from "@/components/reports/DownloadReportButton";
 import {
   VolumeLineChart,
   OptOutLineChart,
@@ -197,18 +198,31 @@ export default function AnalyticsPage() {
             depends on contacts opening WhatsApp.
           </p>
         </div>
-        <div className="flex gap-1 rounded-md border bg-background p-0.5">
-          {(["7d", "30d", "90d"] as const).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                range === r ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
-              }`}
-            >
-              {r === "7d" ? "Last 7 days" : r === "30d" ? "Last 30 days" : "Last 90 days"}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1 rounded-md border bg-background p-0.5">
+            {(["7d", "30d", "90d"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                  range === r ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"
+                }`}
+              >
+                {r === "7d" ? "Last 7 days" : r === "30d" ? "Last 30 days" : "Last 90 days"}
+              </button>
+            ))}
+          </div>
+          {/* Report download for the currently-selected range. The API
+              enforces the Pro gate; below-Pro users see a toast with
+              the upgrade CTA. summary.range carries the exact ISO
+              window the API used, so the report matches what's on
+              screen. */}
+          {summary && (
+            <DownloadReportButton
+              range={{ start: summary.range.start, end: summary.range.end }}
+              size="sm"
+            />
+          )}
         </div>
       </header>
 

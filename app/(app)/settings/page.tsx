@@ -6,7 +6,9 @@ import { DefaultsForm } from "@/components/settings/DefaultsForm";
 import { WhatsAppCredentialsForm } from "@/components/settings/WhatsAppCredentialsForm";
 import { WebhookUrl } from "@/components/settings/WebhookUrl";
 import { WhatsAppConnectionStatus } from "@/components/settings/WhatsAppConnectionStatus";
+import { BrandingForm } from "@/components/settings/BrandingForm";
 import { requireUser } from "@/lib/auth";
+import { resolveBranding } from "@/lib/branding";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +115,23 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           <DefaultsForm />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Branding</CardTitle>
+          <CardDescription>
+            Customize your PDF campaign reports with your logo, company
+            name, and accent color. Available on the Pro plan.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <BrandingForm
+            initial={resolveBranding(user)}
+            canEdit={user.plan === "pro"}
+            plan={user.plan}
+          />
         </CardContent>
       </Card>
 

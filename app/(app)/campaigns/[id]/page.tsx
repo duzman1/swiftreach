@@ -5,8 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StatsBar } from "@/components/shared/StatsBar";
 import { CampaignActions } from "@/components/campaigns/CampaignActions";
+import { DownloadReportButton } from "@/components/reports/DownloadReportButton";
 import { prisma } from "@/lib/prisma";
-import { requireUserId } from "@/lib/auth";
+import { requireUser, requireUserId } from "@/lib/auth";
+import { hasFeature } from "@/lib/plans";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { pickContactName } from "@/lib/contactName";
 import { translateError } from "@/lib/translateError";
@@ -41,8 +43,13 @@ export default async function CampaignDetailPage({
   params: { id: string };
 }) {
   const userId = await requireUserId();
+  const user = await requireUser();
   const campaign = await loadCampaign(params.id, userId);
   if (!campaign) notFound();
+
+  // White-label reports are Pro-only. Below-Pro users don't see the
+  // download button at all; the /billing page carries the upgrade CTA.
+  const canDownloadReport = hasFeature(user.plan, "whiteLabelReports");
 
   const contacts = campaign.contacts;
   // Count delivered/read from TIMESTAMPS, not from `status`. Meta's
@@ -89,14 +96,19 @@ export default async function CampaignDetailPage({
               )}
             </div>
           </div>
-          <CampaignActions
-            campaignId={campaign.id}
-            campaignName={campaign.name}
-            failedCount={counts.failed}
-            failedErrors={contacts
-              .filter((c) => c.status === "failed")
-              .map((c) => c.errorMessage ?? "")}
-          />
+          <div className="flex items-center gap-2 flex-wrap">
+            {canDownloadReport && (
+              <DownloadReportButton campaignId={campaign.id} />
+            )}
+            <CampaignActions
+              campaignId={campaign.id}
+              campaignName={campaign.name}
+              failedCount={counts.failed}
+              failedErrors={contacts
+                .filter((c) => c.status === "failed")
+                .map((c) => c.errorMessage ?? "")}
+            />
+          </div>
         </div>
       </div>
 
