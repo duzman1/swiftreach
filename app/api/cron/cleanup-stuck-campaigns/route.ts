@@ -1,4 +1,6 @@
-// Vercel Cron entry point — runs hourly. Finds campaigns that have
+// Vercel Cron entry point — runs daily at 02:00 UTC (Hobby-plan
+// cron minimum interval is daily; on Pro this could be flipped
+// back to hourly for tighter recovery). Finds campaigns that have
 // been stuck in "sending" status for more than the STUCK_THRESHOLD_MS
 // window, marks each stuck contact as "failed" (send-loop was killed
 // mid-iteration), transitions the campaign to "completed", and fires

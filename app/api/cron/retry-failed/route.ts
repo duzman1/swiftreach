@@ -1,7 +1,9 @@
-// Vercel Cron entry point — runs on the schedule set in vercel.json.
-// Finds completed campaigns that have failed contacts, are opted-in
-// to auto-retry, and have not yet been auto-retried, then runs one
-// pass of the retry engine on each.
+// Vercel Cron entry point — runs daily at 03:00 UTC (Hobby-plan
+// cron minimum interval is daily; on Pro this could be flipped to
+// something more responsive like every 30 minutes). Finds completed
+// campaigns that have failed contacts, are opted-in to auto-retry,
+// and have not yet been auto-retried, then runs one pass of the
+// retry engine on each.
 //
 // SECURITY: matches the existing send-scheduled cron pattern —
 // x-cron-secret header must equal CRON_SECRET.

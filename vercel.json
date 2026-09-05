@@ -33,11 +33,11 @@
     },
     {
       "path": "/api/cron/cleanup-stuck-campaigns",
-      "schedule": "0 * * * *"
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/cron/retry-failed",
-      "schedule": "0 * * * *"
+      "schedule": "0 3 * * *"
     },
     {
       "path": "/api/cron/automations",
