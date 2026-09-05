@@ -16,6 +16,9 @@
     "app/api/cron/retry-failed/route.ts": {
       "maxDuration": 60
     },
+    "app/api/cron/automations/route.ts": {
+      "maxDuration": 300
+    },
     "app/api/drive/import/route.ts": {
       "maxDuration": 60
     },
@@ -35,6 +38,10 @@
     {
       "path": "/api/cron/retry-failed",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/automations",
+      "schedule": "0 13 * * *"
     }
   ]
 }

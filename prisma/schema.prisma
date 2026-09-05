@@ -99,6 +99,7 @@ model User {
   supportRequests    SupportRequest[]
   apiKeys            ApiKey[]
   campaignAlerts     CampaignAlert[]
+  automations        Automation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -471,4 +472,107 @@ model CampaignAlert {
 
   @@index([userId, isRead])
   @@index([campaignId])
+}
+
+// Recurring date-driven automations (birthdays, anniversaries,
+// custom yearly dates). One row per configured automation; each
+// automation owns a set of AutomationContact rows (the recipient
+// list, with their birth/anniversary month+day extracted at
+// upload time) and produces one AutomationRun per daily-cron tick
+// that actually sends anything.
+model Automation {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name             String
+  type             String    // birthday | anniversary | custom_date
+  status           String    @default("active") // active | paused | archived
+
+  // Message configuration
+  mode             String    @default("freeform") // freeform | template
+  message          String?
+  templateName     String?
+  templateLanguage String?   @default("en_US")
+  variableMap      String?   // JSON — VariableMapping[]
+
+  // Contact configuration
+  contacts         AutomationContact[]
+  phoneColumn      String
+  dateColumn       String
+  defaultCountryCode String  @default("1")
+
+  // Schedule. sendHour/sendMinute are informational (the actual
+  // cron fires once per day at a global UTC time — see
+  // lib/automationEngine.ts); daysBeforeDate lets a user send N
+  // days ahead of the actual date (e.g. "send anniversary
+  // greetings 1 day early").
+  sendHour         Int       @default(9)
+  sendMinute       Int       @default(0)
+  daysBeforeDate   Int       @default(0)
+  timezone         String    @default("America/Los_Angeles")
+
+  // Stats
+  totalSent        Int       @default(0)
+  lastRunAt        DateTime?
+  nextRunAt        DateTime?
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  runs             AutomationRun[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// One row per contact in an automation. month/day are precomputed
+// at upload time so the daily cron's date-match query is a cheap
+// indexed lookup instead of parsing rowData for every automation
+// on every tick. lastSentYear is the double-send guard — a contact
+// is never messaged more than once per calendar year.
+model AutomationContact {
+  id           String     @id @default(cuid())
+  automationId String
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  userId       String
+
+  phoneNumber  String
+  name         String?
+  dateValue    String     // original date string from the upload
+  month        Int
+  day          Int
+  rowData      String     // JSON — full CSV row for template variables
+
+  lastSentAt   DateTime?
+  lastSentYear Int?
+  totalSent    Int        @default(0)
+  isActive     Boolean    @default(true)
+
+  createdAt    DateTime   @default(now())
+
+  @@index([automationId, isActive])
+  @@index([automationId, month, day])
+  @@index([userId])
+}
+
+// Audit trail — one row per daily cron pass that actually sent
+// (or attempted to send) anything for a given automation.
+// Surfaces on the automation detail page as "Run history".
+model AutomationRun {
+  id            String     @id @default(cuid())
+  automationId  String
+  automation    Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  userId        String
+
+  runDate       DateTime
+  contactsFound Int
+  sent          Int        @default(0)
+  failed        Int        @default(0)
+  skipped       Int        @default(0)
+  status        String     @default("completed") // completed | partial | failed
+  errorMessage  String?
+
+  createdAt     DateTime   @default(now())
+
+  @@index([automationId, runDate])
+  @@index([userId])
 }

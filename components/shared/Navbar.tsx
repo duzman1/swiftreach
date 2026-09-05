@@ -19,6 +19,7 @@ import {
   Lock,
   LifeBuoy,
   Code2,
+  Sparkles,
   Menu,
   X,
 } from "lucide-react";
@@ -50,6 +51,7 @@ const SECTIONS: { items: NavItem[] }[] = [
     items: [
       { href: "/contacts", label: "Contacts", icon: BookOpen, paidOnly: true },
       { href: "/scheduled", label: "Scheduled", icon: Clock, paidOnly: true },
+      { href: "/automations", label: "Automations", icon: Sparkles, paidOnly: true },
       { href: "/campaigns", label: "Campaigns", icon: History },
       { href: "/analytics", label: "Analytics", icon: BarChart3, paidOnly: true },
       { href: "/templates", label: "Templates", icon: FileText },
