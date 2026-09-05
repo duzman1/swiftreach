@@ -33,16 +33,40 @@ interface Props {
 const HIGHLIGHTED: PlanId = "growth";
 
 // Feature rows for the comparison table (bottom of the page).
-// Each row's `key` maps 1:1 to a FeatureKey in lib/plans.ts.
+// Each row's `key` maps 1:1 to a FeatureKey or a limit slot in
+// lib/plans.ts.
 const FEATURE_ROWS: Array<{
-  key: FeatureKey | "messagesPerMonth" | "whatsappNumbers" | "savedTemplates" | "campaignHistory" | "teamMembers" | "supportSla";
+  key:
+    | FeatureKey
+    | "messagesPerMonth"
+    | "whatsappNumbers"
+    | "savedTemplates"
+    | "campaignHistory"
+    | "teamMembers"
+    | "supportSla"
+    | "inbox"
+    | "automations"
+    | "apiKeys";
   label: string;
-  kind: "feature" | "limit-msg" | "limit-num" | "limit-templates" | "limit-history" | "limit-team" | "sla";
+  kind:
+    | "feature"
+    | "limit-msg"
+    | "limit-num"
+    | "limit-templates"
+    | "limit-history"
+    | "limit-team"
+    | "limit-automations"
+    | "limit-api-keys"
+    | "sla"
+    | "always-on";
 }> = [
   { key: "messagesPerMonth", label: "Messages / month", kind: "limit-msg" },
   { key: "whatsappNumbers", label: "WhatsApp numbers", kind: "limit-num" },
   { key: "savedTemplates", label: "Saved templates", kind: "limit-templates" },
   { key: "campaignHistory", label: "Campaign history", kind: "limit-history" },
+  { key: "inbox", label: "Inbox", kind: "always-on" },
+  { key: "automations", label: "Automations", kind: "limit-automations" },
+  { key: "apiKeys", label: "API keys", kind: "limit-api-keys" },
   { key: "csvExport", label: "CSV export", kind: "feature" },
   { key: "googleDriveImport", label: "Google Drive import", kind: "feature" },
   { key: "scheduledCampaigns", label: "Scheduled campaigns", kind: "feature" },
@@ -425,6 +449,17 @@ function renderCell(
         : `Last ${p.limits.campaignHistory}`;
     case "limit-team":
       return p.limits.teamMembers;
+    case "limit-automations":
+      return p.limits.automations === null
+        ? "Unlimited"
+        : p.limits.automations;
+    case "limit-api-keys":
+      return p.limits.apiKeys;
+    case "always-on":
+      // Rendered as a checkmark on every tier. Used for Inbox — it's
+      // available on every plan (opt-out replies must reach every
+      // user) so we show ✓ across the row rather than a limit value.
+      return <Check className="w-4 h-4 text-emerald-600 mx-auto" />;
     case "sla":
       return p.supportSla;
     case "feature":

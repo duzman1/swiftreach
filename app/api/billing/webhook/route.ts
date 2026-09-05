@@ -14,7 +14,6 @@ import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { planFromPriceId, hasFeature, type PlanId, type BillingInterval } from "@/lib/plans";
-import { resetMonthlyUsage } from "@/lib/usageCheck";
 import { logError } from "@/lib/errorLog";
 
 // The Stripe SDK shifts which fields live on Subscription vs SubscriptionItem
@@ -184,15 +183,14 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      // ─── Successful invoice payment — reset monthly usage ────────────────
+      // ─── invoice.paid — intentionally ignored (FIX 4A) ────────────────────
+      // Stripe invoices no longer influence the usage period. The
+      // monthly counter is now rolled forward plan-independently by
+      // rollUsagePeriodIfExpired() in lib/usageCheck.ts on every send
+      // attempt. See prisma/backfill_usage_period.sql for the
+      // historical context. Subscribed here only so Stripe stops
+      // retrying — no side-effect.
       case "invoice.paid": {
-        const invoice = event.data.object as InvoiceWithSub;
-        const subId = readSubscriptionId(invoice);
-        if (subId) {
-          const sub = await getStripe().subscriptions.retrieve(subId);
-          const userId = sub.metadata?.userId;
-          if (userId) await resetMonthlyUsage(userId);
-        }
         break;
       }
 

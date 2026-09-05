@@ -11,7 +11,6 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +19,6 @@ const PAGE_SIZE = 50;
 export async function GET(req: NextRequest) {
   try {
     const userId = await requireUserId();
-    const gate = await requirePaidPlan(userId, "inbox");
-    if (gate) return gate;
 
     const url = new URL(req.url);
     const q = url.searchParams.get("q")?.trim() ?? "";

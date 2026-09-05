@@ -133,7 +133,24 @@ async function renderDashboard() {
       <StatsBar
         stats={[
           { label: "Total Campaigns", value: formatNumber(data.campaigns) },
-          { label: "Messages Sent", value: formatNumber(data.sent), accent: "success" },
+          {
+            // Renamed from "Messages Sent" to remove ambiguity with the
+            // billing page's period counter. This tile counts every
+            // contact this user has ever messaged (Contact rows with a
+            // non-null sentAt) — an audit-trail number, not a billing
+            // number.
+            label: "Contacts messaged (all time)",
+            value: formatNumber(data.sent),
+            accent: "success",
+          },
+          {
+            // NEW tile: current-billing-period send count, reads the
+            // same messagesUsedThisMonth counter the billing page and
+            // plan-limit enforcement use. By definition matches the
+            // number in the billing usage meter.
+            label: "Messages sent this period",
+            value: formatNumber(user.messagesUsedThisMonth),
+          },
           {
             label: "Delivery Rate",
             value: formatPercent(data.delivered, data.sent),

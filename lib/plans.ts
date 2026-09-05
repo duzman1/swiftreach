@@ -22,7 +22,9 @@ export type LimitKey =
   | "whatsappNumbers"
   | "savedTemplates"
   | "campaignHistory"
-  | "teamMembers";
+  | "teamMembers"
+  | "automations"
+  | "apiKeys";
 
 export type FeatureKey =
   | "csvExport"
@@ -42,6 +44,10 @@ export interface PlanLimitsV2 {
   savedTemplates: number | null;
   campaignHistory: number | null;
   teamMembers: number;
+  /** Max active/paused automations. 0 = feature disabled. null = unlimited. */
+  automations: number | null;
+  /** Max active API keys. 0 = feature disabled. */
+  apiKeys: number;
 }
 
 export interface Plan {
@@ -80,6 +86,8 @@ export const PLANS: Record<PlanId, Plan> = {
       savedTemplates: 3,
       campaignHistory: 10,
       teamMembers: 1,
+      automations: 0,
+      apiKeys: 0,
     },
     features: {
       csvExport: false,
@@ -107,6 +115,8 @@ export const PLANS: Record<PlanId, Plan> = {
       savedTemplates: null, // unlimited
       campaignHistory: null,
       teamMembers: 1,
+      automations: 2,
+      apiKeys: 1,
     },
     features: {
       csvExport: true,
@@ -134,6 +144,8 @@ export const PLANS: Record<PlanId, Plan> = {
       savedTemplates: null,
       campaignHistory: null,
       teamMembers: 3,
+      automations: 10,
+      apiKeys: 3,
     },
     features: {
       csvExport: true,
@@ -161,6 +173,8 @@ export const PLANS: Record<PlanId, Plan> = {
       savedTemplates: null,
       campaignHistory: null,
       teamMembers: 10,
+      automations: null, // unlimited
+      apiKeys: 10,
     },
     features: {
       csvExport: true,

@@ -10,7 +10,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { requirePaidPlan } from "@/lib/planGate";
 import { isUserSuspended, suspendedResponse } from "@/lib/suspendCheck";
 import { decrypt } from "@/lib/encrypt";
 import {
@@ -46,8 +45,6 @@ export async function POST(
 ) {
   try {
     const userId = await requireUserId();
-    const gate = await requirePaidPlan(userId, "inbox");
-    if (gate) return gate;
     if (await isUserSuspended(userId)) return suspendedResponse();
 
     let body: { messageText?: string };

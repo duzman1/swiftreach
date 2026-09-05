@@ -6,7 +6,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +19,6 @@ export async function PUT(
 ) {
   try {
     const userId = await requireUserId();
-    const gate = await requirePaidPlan(userId, "inbox");
-    if (gate) return gate;
 
     let body: { read?: boolean };
     try {

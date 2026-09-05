@@ -6,7 +6,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { requirePaidPlan } from "@/lib/planGate";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +19,6 @@ export async function GET(
 ) {
   try {
     const userId = await requireUserId();
-    const gate = await requirePaidPlan(userId, "inbox");
-    if (gate) return gate;
 
     const message = await prisma.inboundMessage.findUnique({
       where: { id: params.id },
@@ -69,8 +66,6 @@ export async function DELETE(
 ) {
   try {
     const userId = await requireUserId();
-    const gate = await requirePaidPlan(userId, "inbox");
-    if (gate) return gate;
 
     const existing = await prisma.inboundMessage.findUnique({ where: { id: params.id } });
     if (!existing || existing.userId !== userId) return bad("Message not found", 404);

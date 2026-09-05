@@ -1,20 +1,26 @@
-// Plan-tier limits for the automations feature. Extracted so the
-// API create route and the /automations list page can both call
-// the same check (list page uses it to decide whether to render
-// the "Create Automation" CTA or the paywall CTA).
+// Plan-tier limits for the automations feature. All numbers now flow
+// from lib/plans.ts — this module is a thin helper that turns "how
+// many can this user still create?" into a query against the DB.
 //
-// Note: our stripe.ts PLANS only defines free/starter/growth
-// today. "pro" is included here as a forward-compat entry — it
-// takes effect the moment a Pro tier is added upstream.
+// FIX 2B: the AUTOMATION_LIMITS map used to live here as its own
+// source of truth. It was moved into PLANS.<tier>.limits.automations
+// so pricing pages and enforcement can't drift.
 
 import { prisma } from "./prisma";
+import { getLimit } from "./plans";
 
-export const AUTOMATION_LIMITS: Record<string, number> = {
-  free: 0,
-  starter: 2,
-  growth: 10,
-  pro: Number.POSITIVE_INFINITY,
-};
+/** Backwards-compat re-export. New callers should read `getLimit(plan,
+ *  "automations")` directly. `null` in PLANS means "unlimited"; we
+ *  translate to Infinity here for existing arithmetic. */
+export const AUTOMATION_LIMITS: Record<string, number> = new Proxy(
+  {} as Record<string, number>,
+  {
+    get(_target, planId: string) {
+      const limit = getLimit(planId, "automations");
+      return limit === null ? Number.POSITIVE_INFINITY : limit ?? 0;
+    },
+  }
+);
 
 export interface AutomationCapacity {
   plan: string;
@@ -31,7 +37,9 @@ export async function getAutomationCapacity(
   userId: string,
   plan: string
 ): Promise<AutomationCapacity> {
-  const limit = AUTOMATION_LIMITS[plan] ?? 0;
+  const planLimit = getLimit(plan, "automations");
+  const limit =
+    planLimit === null ? Number.POSITIVE_INFINITY : planLimit ?? 0;
   const usedCount = await prisma.automation.count({
     where: { userId, status: { not: "archived" } },
   });

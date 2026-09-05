@@ -1,6 +1,13 @@
 // Plan-limit enforcement helpers. Called from API routes BEFORE side-effects
 // (sending a message, creating a template, exporting CSV, etc.). Limits live
 // in lib/stripe.ts PLANS; this file just consults them.
+//
+// USAGE PERIOD RESET (FIX 4A):
+//   messagesUsedThisMonth is NOT reset by Stripe events. It is reset
+//   lazily by rollUsagePeriodIfExpired() below on every send attempt.
+//   Rationale: Free accounts have no invoices, and annual subscribers
+//   only get invoice.paid once per year — a plan-independent monthly
+//   cycle is the only correct model.
 
 import { prisma } from "./prisma";
 import { getPlanLimits, type PlanLimits } from "./stripe";
@@ -33,6 +40,60 @@ export interface BlockedResult {
 export type LimitCheckResult = AllowedResult | BlockedResult;
 
 /**
+ * Roll the user's usage period forward by whole months until
+ * usagePeriodStart is in the future (i.e. the current period covers
+ * now). Zeroes messagesUsedThisMonth if any roll happened. Idempotent
+ * — a no-op when the period is still current.
+ *
+ * Called at the top of every send-limit check so the counter is
+ * accurate without any cron or webhook dependency.
+ *
+ * Returns the fresh {used, periodStart} the caller should use.
+ */
+async function rollUsagePeriodIfExpired(
+  userId: string
+): Promise<{ used: number; periodStart: Date } | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { messagesUsedThisMonth: true, usagePeriodStart: true },
+  });
+  if (!user) return null;
+
+  const now = new Date();
+  const start = new Date(user.usagePeriodStart);
+
+  // Fast path: still inside the current month-window — nothing to do.
+  // "One month" is defined as calendar-month rolls (Jan 15 → Feb 15,
+  // Feb 15 → Mar 15, …). Handled by incrementing the month field.
+  const next = new Date(start);
+  next.setUTCMonth(next.getUTCMonth() + 1);
+  if (now < next) {
+    return { used: user.messagesUsedThisMonth, periodStart: start };
+  }
+
+  // Roll forward. Advance by whole months until the next boundary is
+  // in the future, so a very-stale account (e.g. dormant for a year)
+  // lands on a current window, not on the first stale boundary.
+  const nextPeriodStart = new Date(start);
+  while (nextPeriodStart <= now) {
+    nextPeriodStart.setUTCMonth(nextPeriodStart.getUTCMonth() + 1);
+  }
+  // The new period STARTS one month before nextPeriodStart's next roll.
+  const rolledStart = new Date(nextPeriodStart);
+  rolledStart.setUTCMonth(rolledStart.getUTCMonth() - 1);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      messagesUsedThisMonth: 0,
+      usagePeriodStart: rolledStart,
+    },
+  });
+
+  return { used: 0, periodStart: rolledStart };
+}
+
+/**
  * Can the user send `count` more messages this period?
  * Also gates on subscription status — past-due paid users can't send.
  */
@@ -40,6 +101,10 @@ export async function checkMessageLimit(
   userId: string,
   count = 1
 ): Promise<LimitCheckResult> {
+  // Roll the usage period first so a stale counter never blocks a
+  // send. This is the ONLY reset mechanism for messagesUsedThisMonth.
+  await rollUsagePeriodIfExpired(userId);
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -151,8 +216,12 @@ export async function incrementMessageUsage(
 }
 
 /**
- * Reset the monthly counter. Called by the Stripe webhook on invoice.paid
- * so the user gets their fresh allotment at the start of each billing cycle.
+ * Reset the monthly counter — admin override only.
+ *
+ * NO LONGER called by the Stripe webhook. Since FIX 4A the usage
+ * period is plan-independent and rolls forward on every send attempt
+ * (see rollUsagePeriodIfExpired above). Kept exported because the
+ * admin user detail page uses it for manual "reset now" actions.
  */
 export async function resetMonthlyUsage(userId: string): Promise<void> {
   await prisma.user.update({

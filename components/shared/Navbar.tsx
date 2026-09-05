@@ -34,6 +34,9 @@ type NavItem = {
   icon: typeof LayoutDashboard;
   /** When true, free-plan users see a lock icon next to the label. */
   paidOnly?: boolean;
+  /** Shown in the tooltip on the lock icon — the plan tier this
+   *  feature starts on. e.g. "Starter", "Growth". */
+  requiresPlan?: string;
   /** Live unread badge (only "inbox" today). */
   badge?: "inbox";
 };
@@ -44,15 +47,15 @@ const SECTIONS: { items: NavItem[] }[] = [
   {
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/inbox", label: "Inbox", icon: Inbox, paidOnly: true, badge: "inbox" },
+      { href: "/inbox", label: "Inbox", icon: Inbox, badge: "inbox" },
       { href: "/send", label: "New Campaign", icon: Send },
     ],
   },
   {
     items: [
       { href: "/contacts", label: "Contacts", icon: BookOpen },
-      { href: "/scheduled", label: "Scheduled", icon: Clock, paidOnly: true },
-      { href: "/automations", label: "Automations", icon: Sparkles, paidOnly: true },
+      { href: "/scheduled", label: "Scheduled", icon: Clock, paidOnly: true, requiresPlan: "Starter" },
+      { href: "/automations", label: "Automations", icon: Sparkles, paidOnly: true, requiresPlan: "Starter" },
       { href: "/campaigns", label: "Campaigns", icon: History },
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
       { href: "/templates", label: "Templates", icon: FileText },
@@ -63,7 +66,7 @@ const SECTIONS: { items: NavItem[] }[] = [
     items: [
       { href: "/support", label: "Support", icon: LifeBuoy },
       { href: "/billing", label: "Billing", icon: CreditCard },
-      { href: "/settings/api-keys", label: "API Keys", icon: Code2, paidOnly: true },
+      { href: "/settings/api-keys", label: "API Keys", icon: Code2, paidOnly: true, requiresPlan: "Starter" },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
@@ -141,7 +144,9 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const billing = useBillingStatus();
   const paid = isPaid(billing?.plan ?? null);
-  const inboxCount = useInboxUnread(paid);
+  // Inbox is available to every plan (opt-out replies must not be
+  // hidden), so poll for unread count regardless of plan tier.
+  const inboxCount = useInboxUnread(true);
 
   // Single "active" href computed up front so that, e.g. on /settings/api-keys
   // the broader /settings link doesn't also light up. We pick the longest
@@ -244,7 +249,11 @@ function NavLink({
           ? "bg-whatsapp text-white"
           : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
       )}
-      title={locked ? `${item.label} — Starter / Growth only` : undefined}
+      title={
+        locked
+          ? `${item.label} — ${item.requiresPlan ?? "Starter"} plan and above`
+          : undefined
+      }
     >
       <Icon className="w-4 h-4 shrink-0" />
       <span className="flex-1 truncate">{item.label}</span>

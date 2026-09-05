@@ -17,7 +17,7 @@ const ACCENT: Record<NonNullable<Stat["accent"]>, string> = {
 
 export function StatsBar({ stats }: { stats: Stat[] }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
       {stats.map((s) => (
         <Card key={s.label}>
           <CardContent className="p-6">

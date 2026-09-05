@@ -13,15 +13,16 @@ import {
   errorResponse,
   handleApiError,
 } from "@/lib/apiResponse";
+import { getLimit } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
-const MAX_KEYS_PER_PLAN: Record<string, number> = {
-  free: 0,
-  starter: 1,
-  growth: 3,
-  pro: 10,
-};
+// FIX 2B: per-plan API-key caps live in lib/plans.ts as the
+// `apiKeys` limit. Read them via getLimit so pricing table +
+// enforcement can't drift.
+function maxKeysForPlan(plan: string): number {
+  return getLimit(plan, "apiKeys") ?? 0;
+}
 
 export async function GET() {
   try {
@@ -39,11 +40,10 @@ export async function GET() {
         createdAt: true,
       },
     });
-    const planMax = MAX_KEYS_PER_PLAN[user.plan] ?? 0;
     return successResponse({
       keys,
       plan: user.plan,
-      maxKeys: planMax,
+      maxKeys: maxKeysForPlan(user.plan),
     });
   } catch (err) {
     return handleApiError(err, "GET /api/api-keys");
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       return errorResponse("Key name must be 60 characters or fewer", 400);
     }
 
-    const max = MAX_KEYS_PER_PLAN[user.plan] ?? 0;
+    const max = maxKeysForPlan(user.plan);
     if (max === 0) {
       return errorResponse(
         "API access requires a paid plan. Upgrade at swiftreach.app/billing",
