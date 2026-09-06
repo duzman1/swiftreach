@@ -98,11 +98,23 @@ async function campaignCounts(campaignIds: string[]): Promise<
 
 async function optOutCount(
   userId: string,
-  range: DateRange | null
+  range: DateRange | null,
+  clientFilter: { clientId?: string | null } = {}
 ): Promise<number> {
   if (!range) return 0;
+  // Client-scoped opt-out counts: OptOutLog isn't client-tagged;
+  // the join goes phoneNumber → SavedContact.clientId. Same shape
+  // the analytics/optouts route uses, so numbers stay consistent.
+  let optOutWhere: { userId: string; phoneNumber?: { in: string[] } } = { userId };
+  if (Object.keys(clientFilter).length > 0) {
+    const rows = await prisma.savedContact.findMany({
+      where: { userId, ...clientFilter },
+      select: { phoneNumber: true },
+    });
+    optOutWhere = { userId, phoneNumber: { in: rows.map((r) => r.phoneNumber) } };
+  }
   return prisma.optOutLog.count({
-    where: { userId, createdAt: { gte: range.start, lte: range.end } },
+    where: { ...optOutWhere, createdAt: { gte: range.start, lte: range.end } },
   });
 }
 
@@ -150,16 +162,30 @@ export async function loadCampaignReport(
 export async function loadRangeReport(
   userId: string,
   range: DateRange,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  /**
+   * Optional per-client filter. Accepted values:
+   *   null | undefined  → no filter (every client + unassigned)
+   *   "unassigned"      → only campaigns with no client label
+   *   "<client-id>"     → only campaigns for that specific client
+   *
+   * Ownership of the client id is NOT checked here — the calling
+   * route validates it against the User before invoking us.
+   */
   clientId?: string | null
 ): Promise<ReportData> {
-  // clientId is accepted for forward-compat only — client tagging
-  // isn't built yet. When it lands, add
-  //   ...(clientId ? { clientId } : {})
-  // to the where clauses below and delete this note.
+  const clientFilter: { clientId?: string | null } =
+    clientId === "unassigned"
+      ? { clientId: null }
+      : clientId
+        ? { clientId }
+        : {};
 
   const campaigns = await prisma.campaign.findMany({
-    where: { userId, createdAt: { gte: range.start, lte: range.end } },
+    where: {
+      userId,
+      ...clientFilter,
+      createdAt: { gte: range.start, lte: range.end },
+    },
     select: { id: true, name: true, createdAt: true, totalCount: true },
     orderBy: { createdAt: "desc" },
   });
@@ -185,7 +211,7 @@ export async function loadRangeReport(
     });
   }
 
-  const optOuts = await optOutCount(userId, range);
+  const optOuts = await optOutCount(userId, range, clientFilter);
 
   return {
     kind: "range",

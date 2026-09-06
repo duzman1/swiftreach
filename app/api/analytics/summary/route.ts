@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { parseRange, pct } from "@/lib/analytics";
+import { parseRange, pct, campaignClientFilter } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const window = parseRange(url.searchParams);
+    const clientFilter = campaignClientFilter(url.searchParams);
 
     // We count by Contact rows joined to user's campaigns, scoped to the
     // moment the campaign was created. (sentAt is null for failed sends
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
       where: {
         campaign: {
           userId,
+          ...clientFilter,
           createdAt: { gte: window.start, lte: window.end },
         },
       },

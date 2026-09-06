@@ -6,6 +6,7 @@ import { applyFilters, type FilterRule } from "@/lib/applyFilters";
 import { type VariableMapping } from "@/lib/whatsapp";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
+import { hasFeature } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -29,20 +30,36 @@ interface CreateCampaignBody {
   rows: Array<Record<string, string>>;
   // Optional: skip these row indices (after filters applied)
   skippedIndices?: number[];
+  // Optional per-client label. Explicit values from the builder win
+  // over the auto-detected unanimous-recipient-client (that
+  // detection happens client-side; server just accepts what it's
+  // sent). Pro-only; ignored on non-Pro plans without erroring.
+  clientId?: string | null;
 }
 
 function badRequest(message: string) {
   return NextResponse.json({ ok: false, error: message }, { status: 400 });
 }
 
-// GET — list the current user's campaigns
-export async function GET() {
+// GET — list the current user's campaigns. Accepts ?clientId= to
+// narrow the list to a single client, or ?clientId=unassigned for
+// campaigns with no label.
+export async function GET(req: NextRequest) {
   try {
     const userId = await requireUserId();
+    const url = new URL(req.url);
+    const raw = url.searchParams.get("clientId");
+    const clientFilter =
+      raw === "unassigned"
+        ? { clientId: null }
+        : raw
+          ? { clientId: raw }
+          : {};
     const campaigns = await prisma.campaign.findMany({
-      where: { userId },
+      where: { userId, ...clientFilter },
       orderBy: { createdAt: "desc" },
       take: 100,
+      include: { client: { select: { id: true, name: true, color: true } } },
     });
     return NextResponse.json({ ok: true, campaigns });
   } catch (err) {
@@ -137,6 +154,36 @@ export async function POST(req: NextRequest) {
     (c) => c.status === "skipped" || c.status === "invalid"
   ).length;
 
+  // Resolve + validate the client label, if one was sent. A Pro user
+  // sending a foreign or archived client id gets 400 (loud, so the
+  // builder can surface it) rather than silently dropped.
+  let clientId: string | null = null;
+  if (body.clientId) {
+    const owner = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { plan: true },
+    });
+    if (!hasFeature(owner?.plan, "perClientReporting")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Per-client reporting requires the Pro plan.",
+          upgradeRequired: true,
+          requiredPlan: "pro",
+        },
+        { status: 403 }
+      );
+    }
+    const client = await prisma.client.findUnique({ where: { id: body.clientId } });
+    if (!client || client.userId !== userId) {
+      return badRequest("Client not found");
+    }
+    if (client.archived) {
+      return badRequest("Cannot assign an archived client. Unarchive it first.");
+    }
+    clientId = client.id;
+  }
+
   try {
     const campaign = await prisma.campaign.create({
       data: {
@@ -153,9 +200,10 @@ export async function POST(req: NextRequest) {
         status: "draft",
         totalCount,
         skippedCount,
+        clientId,
         contacts: { create: contactsData },
       },
-      select: { id: true, name: true, totalCount: true, skippedCount: true },
+      select: { id: true, name: true, totalCount: true, skippedCount: true, clientId: true },
     });
     return NextResponse.json({ ok: true, campaign });
   } catch (err) {

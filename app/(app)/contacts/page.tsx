@@ -6,7 +6,7 @@
 // "Add Contact" button creates one row at a time).
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   Plus,
@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UpgradePrompt } from "@/components/shared/UpgradePrompt";
+import { ClientFilter, ClientChip } from "@/components/clients/ClientFilter";
 
 interface Contact {
   id: string;
@@ -38,6 +39,8 @@ interface Contact {
   optedOutAt: string | null;
   createdAt: string;
   updatedAt: string;
+  clientId?: string | null;
+  client?: { id: string; name: string; color: string | null } | null;
 }
 
 interface Group {
@@ -52,6 +55,8 @@ type Tab = "contacts" | "groups";
 
 export default function ContactsPage() {
   const router = useRouter();
+  const search = useSearchParams();
+  const clientId = search.get("clientId") ?? "";
   const [tab, setTab] = useState<Tab>("contacts");
   const [groups, setGroups] = useState<Group[] | null>(null);
 
@@ -94,6 +99,7 @@ export default function ContactsPage() {
       if (q) sp.set("q", q);
       if (groupFilter) sp.set("groupId", groupFilter);
       if (statusFilter) sp.set("status", statusFilter);
+      if (clientId) sp.set("clientId", clientId);
       sp.set("page", String(page));
       const r = await fetch(`/api/contacts?${sp.toString()}`);
       const j = await r.json();
@@ -122,7 +128,7 @@ export default function ContactsPage() {
       setSelected(new Set());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, page, groupFilter, statusFilter]);
+  }, [tab, page, groupFilter, statusFilter, clientId]);
 
   // Debounced search
   useEffect(() => {
@@ -241,12 +247,15 @@ export default function ContactsPage() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <header>
-        <h1 className="text-3xl font-bold tracking-tight">Contact Book</h1>
-        <p className="text-muted-foreground mt-1">
-          Save contacts once, reuse them across campaigns. Mark contacts opted out
-          to suppress future sends.
-        </p>
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Contact Book</h1>
+          <p className="text-muted-foreground mt-1">
+            Save contacts once, reuse them across campaigns. Mark contacts opted out
+            to suppress future sends.
+          </p>
+        </div>
+        {tab === "contacts" && <ClientFilter />}
       </header>
 
       <div className="border-b flex gap-6">
@@ -508,7 +517,8 @@ function ContactRow({
         {fieldsPreview || <span className="opacity-50">No fields</span>}
       </td>
       <td className="px-4 py-2">
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 items-center">
+          {c.client && <ClientChip client={c.client} />}
           {groupIds.map((gid) => {
             const g = groups.find((x) => x.id === gid);
             if (!g) return null;
@@ -522,7 +532,9 @@ function ContactRow({
               </span>
             );
           })}
-          {groupIds.length === 0 && <span className="text-xs text-muted-foreground">—</span>}
+          {!c.client && groupIds.length === 0 && (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
         </div>
       </td>
       <td className="px-4 py-2">

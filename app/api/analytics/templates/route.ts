@@ -3,12 +3,12 @@
 // breakdown. The template names live on Campaign rows because Meta
 // templates are referenced by name, not a foreign key.
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { requireFeature } from "@/lib/planGate";
-import { pct } from "@/lib/analytics";
+import { pct, campaignClientFilter } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +22,14 @@ interface Row {
   lastUsedAt: Date | null;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const userId = await requireUserId();
     const gate = await requireFeature(userId, "fullAnalytics");
     if (gate) return gate;
+
+    const url = new URL(req.url);
+    const clientFilter = campaignClientFilter(url.searchParams);
 
     // Pull both freeform-message-as-template (saved via "Save as template")
     // and Meta templates. Group counts by templateName for now — the
@@ -45,7 +48,7 @@ export async function GET() {
     // templateName matches. For freeform-saved templates, we don't have a
     // direct link — usageCount is the only signal.
     const campaigns = await prisma.campaign.findMany({
-      where: { userId, mode: "template" },
+      where: { userId, mode: "template", ...clientFilter },
       select: {
         templateName: true,
         contacts: {

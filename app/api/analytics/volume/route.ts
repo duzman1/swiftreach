@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { parseRange, emptyDailySeries, ymd } from "@/lib/analytics";
+import { parseRange, emptyDailySeries, ymd, campaignClientFilter } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +15,13 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const window = parseRange(url.searchParams);
+    const clientFilter = campaignClientFilter(url.searchParams);
 
     // Pull sentAt timestamps in the window. Bucketing in JS keeps the SQL
     // portable across Postgres versions.
     const contacts = await prisma.contact.findMany({
       where: {
-        campaign: { userId },
+        campaign: { userId, ...clientFilter },
         sentAt: { gte: window.start, lte: window.end },
         status: { in: ["sent", "delivered", "read"] },
       },

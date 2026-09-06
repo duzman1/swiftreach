@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
+import { hasFeature } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,10 @@ interface UpdateBody {
   data?: Record<string, string>;
   groupIds?: string[];
   optedOut?: boolean;
+  // Pro-only per-client label. Sending null clears it; sending
+  // a client id assigns to that client (must belong to caller).
+  // Undefined leaves the value untouched.
+  clientId?: string | null;
 }
 
 function bad(message: string, status = 400) {
@@ -49,6 +54,36 @@ export async function PUT(
     if (typeof body.optedOut === "boolean") {
       data.optedOut = body.optedOut;
       data.optedOutAt = body.optedOut ? new Date() : null;
+    }
+    if (body.clientId !== undefined) {
+      // Clearing (null) is always allowed — a user who lost Pro
+      // must still be able to unassign a stale label. Assigning
+      // requires Pro AND ownership of the target client.
+      if (body.clientId === null) {
+        data.clientId = null;
+      } else {
+        const owner = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { plan: true },
+        });
+        if (!hasFeature(owner?.plan, "perClientReporting")) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "Per-client reporting requires the Pro plan.",
+              upgradeRequired: true,
+              requiredPlan: "pro",
+            },
+            { status: 403 }
+          );
+        }
+        const client = await prisma.client.findUnique({ where: { id: body.clientId } });
+        if (!client || client.userId !== userId) return bad("Client not found", 404);
+        if (client.archived) {
+          return bad("Cannot assign an archived client. Unarchive it first.", 400);
+        }
+        data.clientId = body.clientId;
+      }
     }
 
     const updated = await prisma.savedContact.update({

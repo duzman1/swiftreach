@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { requireFeature } from "@/lib/planGate";
-import { parseRange, emptyDailySeries, ymd, pct } from "@/lib/analytics";
+import { parseRange, emptyDailySeries, ymd, pct, campaignClientFilter } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -18,23 +18,41 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const window = parseRange(url.searchParams);
+    const clientFilter = campaignClientFilter(url.searchParams);
 
     const startOfMonth = new Date();
     startOfMonth.setUTCDate(1);
     startOfMonth.setUTCHours(0, 0, 0, 0);
 
+    // When a client filter is active, restrict opt-outs to those from
+    // SavedContacts labelled with that client. OptOutLog isn't
+    // client-tagged directly; the join goes phoneNumber → SavedContact.
+    let optOutPhones: string[] | null = null;
+    if (Object.keys(clientFilter).length > 0) {
+      const rows = await prisma.savedContact.findMany({
+        where: { userId, ...clientFilter },
+        select: { phoneNumber: true },
+      });
+      optOutPhones = rows.map((r) => r.phoneNumber);
+    }
+    const optOutBase = optOutPhones
+      ? { userId, phoneNumber: { in: optOutPhones } }
+      : { userId };
+
     const [totalOptedOut, thisMonth, inRange, sentInRange] = await Promise.all([
-      prisma.savedContact.count({ where: { userId, optedOut: true } }),
+      prisma.savedContact.count({
+        where: { userId, ...clientFilter, optedOut: true },
+      }),
       prisma.optOutLog.count({
-        where: { userId, createdAt: { gte: startOfMonth } },
+        where: { ...optOutBase, createdAt: { gte: startOfMonth } },
       }),
       prisma.optOutLog.findMany({
-        where: { userId, createdAt: { gte: window.start, lte: window.end } },
+        where: { ...optOutBase, createdAt: { gte: window.start, lte: window.end } },
         select: { createdAt: true },
       }),
       prisma.contact.count({
         where: {
-          campaign: { userId },
+          campaign: { userId, ...clientFilter },
           sentAt: { gte: window.start, lte: window.end },
           status: { in: ["sent", "delivered", "read"] },
         },

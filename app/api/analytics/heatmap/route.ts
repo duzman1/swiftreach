@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { requireFeature } from "@/lib/planGate";
-import { parseRange, pct } from "@/lib/analytics";
+import { parseRange, pct, campaignClientFilter } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +23,11 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const window = parseRange(url.searchParams);
+    const clientFilter = campaignClientFilter(url.searchParams);
 
     const contacts = await prisma.contact.findMany({
       where: {
-        campaign: { userId },
+        campaign: { userId, ...clientFilter },
         sentAt: { gte: window.start, lte: window.end },
         status: { in: ["sent", "delivered", "read"] },
       },
