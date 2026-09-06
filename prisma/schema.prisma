@@ -117,6 +117,7 @@ model User {
   campaignAlerts     CampaignAlert[]
   automations        Automation[]
   reportGenerations  ReportGeneration[]
+  clients            Client[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -165,7 +166,15 @@ model Campaign {
   retriedContactCount  Int       @default(0)
   retryDelivered       Int       @default(0)
 
+  // Per-client label (Pro feature). Nullable; a null value means
+  // "unassigned" and matches the "Unassigned" filter option.
+  // onDelete: SetNull so deleting a client leaves the campaign
+  // and its message history intact — the label just clears.
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
   @@index([userId])
+  @@index([userId, clientId])
 }
 
 model Contact {
@@ -311,9 +320,16 @@ model SavedContact {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  // Per-client label (Pro feature). Nullable; deleting a client
+  // clears the label but never removes the contact. See Client
+  // model for the ownership + archive semantics.
+  clientId    String?
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
   @@unique([userId, phoneNumber])
   @@index([userId])
   @@index([userId, optedOut])
+  @@index([userId, clientId])
 }
 
 // Soft container for grouping contacts ("VIPs", "March Cohort"). Membership
@@ -606,4 +622,38 @@ model ReportGeneration {
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// Per-client label owned by a Pro user. Clients are NOT tenants —
+// there is no login, permissions, or data isolation between them.
+// They exist only so a Pro user can filter their own analytics and
+// PDF reports by which of their downstream clients a campaign or
+// address-book contact belongs to.
+//
+// Delete + archive semantics
+// - Archiving hides the client from create/assign UI but keeps it
+//   visible in historical reports and filter lists.
+// - Hard deleting a client clears the label on every SavedContact
+//   and Campaign that referenced it (onDelete: SetNull) — it never
+//   removes the underlying rows or their message history.
+//
+// The (userId, name) unique constraint prevents an agency from
+// accidentally creating duplicate labels for the same downstream
+// client (case-sensitive; UI should normalize before submit).
+model Client {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  color         String?  // hex like "#25D366" for UI chips; UI defaults if null
+  archived      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  campaigns     Campaign[]
+  savedContacts SavedContact[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([userId, archived])
 }

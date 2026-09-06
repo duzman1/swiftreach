@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
-import { parseRange, pct } from "@/lib/analytics";
+import { parseRange, pct, campaignClientFilter } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +16,14 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const window = parseRange(url.searchParams);
+    const clientFilter = campaignClientFilter(url.searchParams);
 
     const campaigns = await prisma.campaign.findMany({
-      where: { userId, createdAt: { gte: window.start, lte: window.end } },
+      where: {
+        userId,
+        ...clientFilter,
+        createdAt: { gte: window.start, lte: window.end },
+      },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,

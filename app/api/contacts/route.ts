@@ -34,6 +34,9 @@ export async function GET(req: NextRequest) {
     const search = url.searchParams.get("q")?.trim() ?? "";
     const groupId = url.searchParams.get("groupId") ?? "";
     const status = url.searchParams.get("status") ?? ""; // active|opted_out
+    // Per-client filter: `unassigned` shorthand for "no label", or a
+    // client id for a specific label. Empty = all.
+    const clientFilter = url.searchParams.get("clientId") ?? "";
     const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
 
     const where: Prisma.SavedContactWhereInput = { userId };
@@ -45,6 +48,8 @@ export async function GET(req: NextRequest) {
     }
     if (status === "opted_out") where.optedOut = true;
     if (status === "active") where.optedOut = false;
+    if (clientFilter === "unassigned") where.clientId = null;
+    else if (clientFilter) where.clientId = clientFilter;
     // Group membership: groupIds is JSON-string of an array. The cheapest
     // portable check is `contains` on the JSON text — accurate enough as
     // long as group ids are cuids (no collision with substrings of other
@@ -58,6 +63,7 @@ export async function GET(req: NextRequest) {
         orderBy: { updatedAt: "desc" },
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
+        include: { client: { select: { id: true, name: true, color: true } } },
       }),
     ]);
 

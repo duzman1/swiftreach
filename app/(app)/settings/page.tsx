@@ -7,8 +7,10 @@ import { WhatsAppCredentialsForm } from "@/components/settings/WhatsAppCredentia
 import { WebhookUrl } from "@/components/settings/WebhookUrl";
 import { WhatsAppConnectionStatus } from "@/components/settings/WhatsAppConnectionStatus";
 import { BrandingForm } from "@/components/settings/BrandingForm";
+import { ClientsManager } from "@/components/settings/ClientsManager";
 import { requireUser } from "@/lib/auth";
 import { resolveBranding } from "@/lib/branding";
+import { hasFeature } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -130,6 +132,23 @@ export default async function SettingsPage() {
           <BrandingForm
             initial={resolveBranding(user)}
             canEdit={user.plan === "pro"}
+            plan={user.plan}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Clients</CardTitle>
+          <CardDescription>
+            Label contacts and campaigns by client so you can filter
+            analytics and PDF reports to a single client. Available on
+            the Pro plan.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ClientsManager
+            canEdit={hasFeature(user.plan, "perClientReporting")}
             plan={user.plan}
           />
         </CardContent>

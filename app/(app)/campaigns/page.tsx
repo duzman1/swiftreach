@@ -5,48 +5,79 @@ import { CampaignListRow } from "@/components/campaigns/CampaignListRow";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { getPlanLimits, getPlanName } from "@/lib/stripe";
+import { ClientFilter } from "@/components/clients/ClientFilter";
+import { hasFeature } from "@/lib/plans";
+import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-async function loadCampaigns(userId: string, take: number) {
+async function loadCampaigns(
+  userId: string,
+  take: number,
+  clientFilter: Prisma.CampaignWhereInput
+) {
   try {
     return await prisma.campaign.findMany({
-      where: { userId },
+      where: { userId, ...clientFilter },
       orderBy: { createdAt: "desc" },
       // Free plan caps history at 10. Paid plans pass Infinity → undefined
       // → no limit.
       take: Number.isFinite(take) ? take : undefined,
+      include: { client: { select: { id: true, name: true, color: true } } },
     });
   } catch {
     return [];
   }
 }
 
-async function countAllCampaigns(userId: string) {
+async function countAllCampaigns(
+  userId: string,
+  clientFilter: Prisma.CampaignWhereInput
+) {
   try {
-    return await prisma.campaign.count({ where: { userId } });
+    return await prisma.campaign.count({ where: { userId, ...clientFilter } });
   } catch {
     return 0;
   }
 }
 
-export default async function CampaignsPage() {
+export default async function CampaignsPage({
+  searchParams,
+}: {
+  searchParams?: { clientId?: string };
+}) {
   const user = await requireUser();
   const limits = getPlanLimits(user.plan);
   const cap = limits.campaignHistory; // Infinity for paid, 10 for free
   const isCapped = Number.isFinite(cap);
 
+  // Client filter — only respected for Pro. Below-Pro users won't
+  // see the filter control (ClientFilter self-hides when the
+  // /api/clients call returns empty/403), so a hand-crafted URL
+  // param on those plans just silently no-ops here.
+  const rawClient = searchParams?.clientId ?? "";
+  const canFilter = hasFeature(user.plan, "perClientReporting");
+  const clientFilter: Prisma.CampaignWhereInput =
+    canFilter && rawClient === "unassigned"
+      ? { clientId: null }
+      : canFilter && rawClient
+        ? { clientId: rawClient }
+        : {};
+
   const [campaigns, totalCount] = await Promise.all([
-    loadCampaigns(user.id, cap),
-    isCapped ? countAllCampaigns(user.id) : Promise.resolve(0),
+    loadCampaigns(user.id, cap, clientFilter),
+    isCapped ? countAllCampaigns(user.id, clientFilter) : Promise.resolve(0),
   ]);
   const hidden = isCapped ? Math.max(0, totalCount - campaigns.length) : 0;
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <header>
-        <h1 className="text-3xl font-bold tracking-tight">Campaigns</h1>
-        <p className="text-muted-foreground mt-1">All sends, past and present.</p>
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Campaigns</h1>
+          <p className="text-muted-foreground mt-1">All sends, past and present.</p>
+        </div>
+        <ClientFilter />
       </header>
 
       <Card>
@@ -76,6 +107,7 @@ export default async function CampaignsPage() {
                     sentCount={c.sentCount}
                     failedCount={c.failedCount}
                     totalCount={c.totalCount}
+                    client={c.client}
                   />
                 ))}
               </ul>

@@ -64,3 +64,22 @@ export function pct(numerator: number, denominator: number): number {
   if (!denominator) return 0;
   return Math.round((numerator / denominator) * 1000) / 10; // one decimal
 }
+
+/**
+ * Parse the ?clientId= URL param and return the filter fragment to
+ * merge into a Campaign `where` clause. Empty/missing → no filter
+ * (all clients). "unassigned" → clientId: null. Any other string →
+ * clientId equals it (a foreign id just returns no rows, which is
+ * the right behaviour: no data leak, no error).
+ *
+ * Shape is spreadable so a caller can write:
+ *   where: { userId, ...campaignClientFilter(sp), createdAt: {...} }
+ */
+export function campaignClientFilter(
+  searchParams: URLSearchParams
+): { clientId?: string | null } {
+  const raw = searchParams.get("clientId");
+  if (!raw) return {};
+  if (raw === "unassigned") return { clientId: null };
+  return { clientId: raw };
+}

@@ -19,6 +19,10 @@ type Props = {
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
   className?: string;
+  // Optional per-client filter. Only meaningful in the range shape —
+  // a single-campaign report is inherently scoped to that campaign
+  // already. Empty string / undefined = All clients.
+  clientId?: string;
 } & (
   | { campaignId: string; range?: never }
   | { range: { start: string; end: string }; campaignId?: never }
@@ -30,10 +34,13 @@ export function DownloadReportButton(props: Props) {
   async function generate() {
     setBusy(true);
     try {
-      const payload =
+      const payload: Record<string, unknown> =
         "campaignId" in props && props.campaignId
           ? { campaignId: props.campaignId }
           : { range: props.range };
+      // Attach clientId for range reports when the caller passed one.
+      // The server treats "" as absent, so we only include a real id.
+      if (props.clientId) payload.clientId = props.clientId;
       const r = await fetch("/api/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

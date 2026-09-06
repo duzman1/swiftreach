@@ -34,7 +34,7 @@ export type FeatureKey =
   | "analyticsExport"
   | "savedAudiences"
   | "whiteLabelReports"
-  | "clientWorkspaces"
+  | "perClientReporting"
   | "customOnboarding"
   | "birthdayAutomations";
 
@@ -98,7 +98,7 @@ export const PLANS: Record<PlanId, Plan> = {
       analyticsExport: false,
       savedAudiences: false,
       whiteLabelReports: false,
-      clientWorkspaces: false,
+      perClientReporting: false,
       customOnboarding: false,
       birthdayAutomations: false,
     },
@@ -128,7 +128,7 @@ export const PLANS: Record<PlanId, Plan> = {
       analyticsExport: false,
       savedAudiences: false,
       whiteLabelReports: false,
-      clientWorkspaces: false,
+      perClientReporting: false,
       customOnboarding: false,
       birthdayAutomations: false,
     },
@@ -158,7 +158,7 @@ export const PLANS: Record<PlanId, Plan> = {
       analyticsExport: false,
       savedAudiences: true,
       whiteLabelReports: false,
-      clientWorkspaces: false,
+      perClientReporting: false,
       customOnboarding: false,
       birthdayAutomations: true,
     },
@@ -188,12 +188,11 @@ export const PLANS: Record<PlanId, Plan> = {
       analyticsExport: true,
       savedAudiences: true,
       whiteLabelReports: true,
-      // clientWorkspaces stays FALSE until per-client tagging + scoping
-      // + client logins actually ship. The Pro card advertised
-      // "Client workspaces" without the underlying feature — the
-      // pricing row is now labelled "Per-client reporting" and shows
-      // ✕ across every plan until that work lands.
-      clientWorkspaces: false,
+      // Per-client tagging + analytics filter + per-client PDF report
+      // shipped. Comparison-table row + Pro card bullet now render ✓.
+      // Client logins/permissions/isolation are explicitly NOT part
+      // of this feature — the label is "reporting", not "workspaces".
+      perClientReporting: true,
       customOnboarding: true,
       birthdayAutomations: true,
     },

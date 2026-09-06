@@ -7,6 +7,7 @@
 // All data loads in parallel on mount + on range change.
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -23,6 +24,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Heatmap } from "@/components/analytics/Heatmap";
 import { DownloadReportButton } from "@/components/reports/DownloadReportButton";
+import { ClientFilter } from "@/components/clients/ClientFilter";
 import {
   VolumeLineChart,
   OptOutLineChart,
@@ -117,17 +119,27 @@ export default function AnalyticsPage() {
   const [sortKey, setSortKey] = useState<keyof CampaignRow>("readRate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+  // Client filter reads from URL so it survives page reload and can
+  // be shared as a bookmarked view. When it changes, refetch — same
+  // shape as the range dependency.
+  const search = useSearchParams();
+  const clientId = search.get("clientId") ?? "";
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const qs = `?range=${range}`;
+    const clientQs = clientId ? `&clientId=${encodeURIComponent(clientId)}` : "";
+    const qs = `?range=${range}${clientQs}`;
+    // Templates route doesn't take range but does take clientId now,
+    // so build its query string separately.
+    const templateQs = clientId ? `?clientId=${encodeURIComponent(clientId)}` : "";
     const withStatus = (url: string) =>
       fetch(url).then((r) => r.json().then((j) => ({ status: r.status, j })));
     Promise.all([
       withStatus(`/api/analytics/summary${qs}`),
       withStatus(`/api/analytics/volume${qs}`),
       withStatus(`/api/analytics/heatmap${qs}`),
-      withStatus(`/api/analytics/templates`),
+      withStatus(`/api/analytics/templates${templateQs}`),
       withStatus(`/api/analytics/campaigns${qs}`),
       withStatus(`/api/analytics/optouts${qs}`),
     ])
@@ -155,7 +167,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [range, clientId]);
 
   const funnelData: FunnelBar[] = summary
     ? [
@@ -199,6 +211,7 @@ export default function AnalyticsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <ClientFilter />
           <div className="flex gap-1 rounded-md border bg-background p-0.5">
             {(["7d", "30d", "90d"] as const).map((r) => (
               <button
@@ -212,14 +225,14 @@ export default function AnalyticsPage() {
               </button>
             ))}
           </div>
-          {/* Report download for the currently-selected range. The API
-              enforces the Pro gate; below-Pro users see a toast with
-              the upgrade CTA. summary.range carries the exact ISO
-              window the API used, so the report matches what's on
-              screen. */}
+          {/* Report download for the currently-selected range + client.
+              summary.range carries the ISO window the API used; clientId
+              (if any) is passed through so the PDF matches what's on
+              screen. Pro gate + error handling live inside the button. */}
           {summary && (
             <DownloadReportButton
               range={{ start: summary.range.start, end: summary.range.end }}
+              clientId={clientId || undefined}
               size="sm"
             />
           )}

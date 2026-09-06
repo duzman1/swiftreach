@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2, Loader2 } from "lucide-react";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ClientChip } from "@/components/clients/ClientFilter";
 import { formatNumber } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -16,6 +17,7 @@ interface Props {
   sentCount: number;
   failedCount: number;
   totalCount: number;
+  client?: { id: string; name: string; color: string | null } | null;
 }
 
 export function CampaignListRow({
@@ -26,6 +28,7 @@ export function CampaignListRow({
   sentCount,
   failedCount,
   totalCount,
+  client,
 }: Props) {
   const router = useRouter();
   const [deleting, setDeleting] = React.useState(false);
@@ -60,7 +63,10 @@ export function CampaignListRow({
         className="py-3 -mx-2 px-2 rounded flex items-center justify-between gap-4 hover:bg-zinc-50 transition-colors"
       >
         <div className="min-w-0 flex-1">
-          <div className="font-medium truncate">{name}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium truncate">{name}</span>
+            <ClientChip client={client ?? null} />
+          </div>
           <div className="text-xs text-muted-foreground">
             {new Date(createdAt).toLocaleString()} ·{" "}
             {formatNumber(sentCount)}/{formatNumber(totalCount)} sent ·{" "}

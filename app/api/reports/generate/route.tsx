@@ -134,14 +134,47 @@ export async function POST(req: NextRequest) {
           400
         );
       }
-      data = await loadRangeReport(user.id, { start, end }, body.clientId ?? null);
+
+      // Optional per-client filter. Validate ownership up front so a
+      // foreign or unknown id returns 404 rather than silently rendering
+      // an empty report. "unassigned" is a valid literal that filters
+      // to Campaign.clientId IS NULL.
+      let scopedClient: { id: string; name: string } | null = null;
+      const rawClient = typeof body.clientId === "string" ? body.clientId.trim() : "";
+      let clientArg: string | null = null;
+      if (rawClient && rawClient !== "unassigned") {
+        const c = await prisma.client.findUnique({ where: { id: rawClient } });
+        if (!c || c.userId !== user.id) {
+          return errorResponse("Client not found", 404);
+        }
+        scopedClient = { id: c.id, name: c.name };
+        clientArg = c.id;
+      } else if (rawClient === "unassigned") {
+        clientArg = "unassigned";
+      }
+
+      data = await loadRangeReport(user.id, { start, end }, clientArg);
       title = "Campaign Report";
       const fmt = new Intl.DateTimeFormat("en-US", {
         year: "numeric", month: "long", day: "numeric", timeZone: timezone,
       });
-      subtitle = `${fmt.format(start)} – ${fmt.format(end)}`;
+      const dateLine = `${fmt.format(start)} – ${fmt.format(end)}`;
+      // Show the client name under the title so a client receiving
+      // the PDF sees whose work it is at a glance.
+      subtitle = scopedClient
+        ? `Client: ${scopedClient.name} · ${dateLine}`
+        : rawClient === "unassigned"
+          ? `Unassigned campaigns · ${dateLine}`
+          : dateLine;
       kind = "range";
-      filenameStub = "campaigns";
+      // Filename gets the client slug wedged between the company and
+      // the "campaigns" stub so a client can spot their report in a
+      // folder full of others.
+      filenameStub = scopedClient
+        ? `${companySlug(scopedClient.name)}-campaigns`
+        : rawClient === "unassigned"
+          ? "unassigned-campaigns"
+          : "campaigns";
     }
 
     // Render PDF. @react-pdf's `pdf(<Doc/>).toBuffer()` returns a Node
