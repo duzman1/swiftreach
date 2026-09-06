@@ -188,7 +188,12 @@ export const PLANS: Record<PlanId, Plan> = {
       analyticsExport: true,
       savedAudiences: true,
       whiteLabelReports: true,
-      clientWorkspaces: true,
+      // clientWorkspaces stays FALSE until per-client tagging + scoping
+      // + client logins actually ship. The Pro card advertised
+      // "Client workspaces" without the underlying feature — the
+      // pricing row is now labelled "Per-client reporting" and shows
+      // ✕ across every plan until that work lands.
+      clientWorkspaces: false,
       customOnboarding: true,
       birthdayAutomations: true,
     },

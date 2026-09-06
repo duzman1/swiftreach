@@ -80,7 +80,7 @@ const FEATURE_ROWS: Array<{
   { key: "savedAudiences", label: "Saved audiences", kind: "feature" },
   { key: "teamMembers", label: "Team members", kind: "limit-team" },
   { key: "whiteLabelReports", label: "White-label reports", kind: "feature" },
-  { key: "clientWorkspaces", label: "Client workspaces", kind: "feature" },
+  { key: "clientWorkspaces", label: "Per-client reporting", kind: "feature" },
   { key: "customOnboarding", label: "Custom onboarding", kind: "feature" },
   { key: "supportSla", label: "Support SLA", kind: "sla" },
 ];
@@ -412,7 +412,9 @@ function renderBullets(p: Plan): string[] {
   // lower tiers add whatever features they've enabled.
   if (p.id === "pro") {
     bullets.push("White-label reports");
-    bullets.push("Client workspaces");
+    // "Client workspaces" bullet removed — per-client tagging isn't
+    // built yet. The comparison table shows "Per-client reporting"
+    // with ✕ across all four tiers until it ships.
     bullets.push("1-hour custom onboarding call");
   } else {
     if (p.features.scheduledCampaigns)

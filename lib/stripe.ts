@@ -93,7 +93,7 @@ function toLegacy(p: NewPlan): Plan {
   if (p.features.analyticsExport) featureStrings.push("Analytics export");
   if (p.features.savedAudiences) featureStrings.push("Saved audiences");
   if (p.features.whiteLabelReports) featureStrings.push("White-label reports");
-  if (p.features.clientWorkspaces) featureStrings.push("Client workspaces");
+  if (p.features.clientWorkspaces) featureStrings.push("Per-client reporting");
   if (p.features.customOnboarding) featureStrings.push("Custom onboarding");
   featureStrings.push(p.supportSla);
 
