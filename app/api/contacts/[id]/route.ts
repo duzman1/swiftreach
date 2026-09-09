@@ -20,6 +20,13 @@ interface UpdateBody {
   // a client id assigns to that client (must belong to caller).
   // Undefined leaves the value untouched.
   clientId?: string | null;
+  // Consent provenance edits. Any subset is allowed; sending null
+  // for source/date/note clears them. Sending consentStatus stamps
+  // consentRecordedAt to now — user explicitly asserted the value.
+  consentStatus?: "explicit" | "imported" | "unknown";
+  consentSource?: string | null;
+  consentDate?: string | null;
+  consentNote?: string | null;
 }
 
 function bad(message: string, status = 400) {
@@ -55,6 +62,22 @@ export async function PUT(
       data.optedOut = body.optedOut;
       data.optedOutAt = body.optedOut ? new Date() : null;
     }
+    // Consent field updates. All optional; sending consentStatus
+    // stamps consentRecordedAt to now (user made a positive
+    // assertion). Setting source/date/note to null clears them.
+    if (body.consentStatus !== undefined) {
+      if (body.consentStatus === "explicit" || body.consentStatus === "imported" || body.consentStatus === "unknown") {
+        data.consentStatus = body.consentStatus;
+        data.consentRecordedAt = new Date();
+      }
+    }
+    if (body.consentSource !== undefined) data.consentSource = body.consentSource || null;
+    if (body.consentDate !== undefined) {
+      const d = body.consentDate ? new Date(body.consentDate) : null;
+      data.consentDate = d && !Number.isNaN(d.getTime()) ? d : null;
+    }
+    if (body.consentNote !== undefined) data.consentNote = body.consentNote || null;
+
     if (body.clientId !== undefined) {
       // Clearing (null) is always allowed — a user who lost Pro
       // must still be able to unassign a stale label. Assigning
@@ -90,6 +113,31 @@ export async function PUT(
       where: { id: params.id },
       data,
     });
+
+    // Manual opt-out toggle propagates to the phone-level DNC list.
+    // Flipping true → adds/keeps a DNC row (upsert), flipping false
+    // → REMOVES the DNC row. This matches user intent: an admin who
+    // manually re-subscribes a contact from the UI expects the phone
+    // to stop being suppressed. If we left the DNC row in place, the
+    // toggle would look broken ("I un-opted them but sends still get
+    // blocked").
+    if (typeof body.optedOut === "boolean") {
+      if (body.optedOut) {
+        await prisma.doNotContact.upsert({
+          where: { userId_phoneNumber: { userId, phoneNumber: updated.phoneNumber } },
+          create: {
+            userId,
+            phoneNumber: updated.phoneNumber,
+            reason: "manual",
+          },
+          update: {},
+        });
+      } else {
+        await prisma.doNotContact
+          .delete({ where: { userId_phoneNumber: { userId, phoneNumber: updated.phoneNumber } } })
+          .catch(() => undefined); // no-op if not present
+      }
+    }
 
     // Bump group counts on group changes.
     if (Array.isArray(body.groupIds)) {

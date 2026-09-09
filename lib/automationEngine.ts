@@ -29,6 +29,11 @@ import { getMatchingDatesForToday } from "./dateUtils";
 import { logError } from "./errorLog";
 import { hasFeature, getLimit } from "./plans";
 import { checkMessageLimit, incrementMessageUsage } from "./usageCheck";
+import {
+  loadSuppressedSet,
+  classifySuppressions,
+  logSuppressed,
+} from "./checkSuppression";
 
 const INTER_CONTACT_DELAY_MS = 1000;
 
@@ -274,10 +279,31 @@ export async function runDailyAutomations(): Promise<AutomationRunSummary> {
     let runSent = 0;
     let runFailed = 0;
     let runSkippedByLimit = 0;
+    let runSuppressed = 0;
     let stoppedByLimit = false;
+
+    // COMPLIANCE (finding 4 fix). Automations previously had NO
+    // opt-out check, so a contact who had texted STOP was still being
+    // messaged on their birthday. Load this user's suppression set
+    // once per automation run (one query, not one per contact), then
+    // skip any phone in it. Log all skips to SuppressionLog so we
+    // have an audit trail — the paper trail is the whole point.
+    const suppressedSet = await loadSuppressedSet(prisma, automation.user.id);
+    const skippedPhones: string[] = [];
 
     for (let i = 0; i < automation.contacts.length; i++) {
       const contact = automation.contacts[i];
+
+      // Skip suppressed phones BEFORE the message-limit check, so a
+      // send that would never happen doesn't count as one that got
+      // limited-out. Also skip BEFORE any Meta API call — the whole
+      // point is not to dispatch.
+      if (suppressedSet.has(contact.phoneNumber)) {
+        skippedPhones.push(contact.phoneNumber);
+        runSuppressed++;
+        totalSkipped++;
+        continue;
+      }
 
       // Per-recipient message-limit check. Even a birthday send
       // costs one message and must count against the owner's
@@ -369,6 +395,28 @@ export async function runDailyAutomations(): Promise<AutomationRunSummary> {
       }
     }
 
+    // Flush suppression audit rows for this automation run. One bulk
+    // insert per automation per day — cheap. Classifies each skip as
+    // "opted_out" vs "do_not_contact" so the compliance dashboard
+    // can break them down.
+    if (skippedPhones.length > 0) {
+      const reasons = await classifySuppressions(
+        prisma,
+        automation.user.id,
+        skippedPhones
+      );
+      await logSuppressed(
+        prisma,
+        skippedPhones.map((phone) => ({
+          userId: automation.user.id,
+          phoneNumber: phone,
+          surface: "automation",
+          reason: reasons.get(phone) ?? "opted_out",
+          automationId: automation.id,
+        }))
+      );
+    }
+
     const runStatus = stoppedByLimit
       ? "limit_reached"
       : runFailed === 0
@@ -378,11 +426,16 @@ export async function runDailyAutomations(): Promise<AutomationRunSummary> {
       contactsFound: automation.contacts.length,
       sent: runSent,
       failed: runFailed,
-      skipped: runSkippedByLimit,
+      // Roll suppression skips into the reported "skipped" count so
+      // admins seeing "N skipped" in the automation history see the
+      // full picture — limit skips + opt-out skips.
+      skipped: runSkippedByLimit + runSuppressed,
       status: runStatus,
       errorMessage: stoppedByLimit
         ? `Monthly message limit reached — stopped after ${runSent} sends, ${runSkippedByLimit} skipped`
-        : undefined,
+        : runSuppressed > 0
+          ? `${runSuppressed} recipient${runSuppressed === 1 ? "" : "s"} suppressed (opted out or on do-not-contact list)`
+          : undefined,
     });
 
     await prisma.automation.update({

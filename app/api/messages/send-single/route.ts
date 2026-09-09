@@ -13,6 +13,8 @@ import { buildMessage, type FormatRule } from "@/lib/buildMessage";
 import { requireUser } from "@/lib/auth";
 import { decrypt } from "@/lib/encrypt";
 import { handleApiError } from "@/lib/apiResponse";
+import { prisma } from "@/lib/prisma";
+import { checkSuppression } from "@/lib/checkSuppression";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +90,31 @@ export async function POST(req: NextRequest) {
     );
     if (!isValidPhone(phone)) {
       return badRequest("Invalid phone number (need at least 10 digits)");
+    }
+
+    // Compliance (finding 6). Single-send / test-send was previously
+    // ungated — a user could hit send on a phone that had texted STOP
+    // and Meta would deliver it. Return 409 with a user-facing
+    // message the wizard renders inline (silent no-op is worse — reads
+    // as a bug and gets reported as one).
+    const decision = await checkSuppression(prisma, {
+      userId: user.id,
+      phoneNumber: phone,
+      surface: "single_send",
+    });
+    if (decision.suppress) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "SUPPRESSED",
+          reason: decision.reason,
+          error:
+            decision.reason === "do_not_contact"
+              ? `${phone} is on your do-not-contact list. Removing them from a contact list does not clear this — they opted out and the block is permanent unless you manually clear it in Compliance settings.`
+              : `${phone} has opted out. Sends to this number are blocked. If this is wrong, un-opt them from the contact row first.`,
+        },
+        { status: 409 }
+      );
     }
 
     if (body.mode === "freeform") {

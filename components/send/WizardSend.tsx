@@ -68,6 +68,15 @@ export function WizardSend() {
   const [saveToBook, setSaveToBook] = React.useState(false);
   const [saveBookGroupName, setSaveBookGroupName] = React.useState("");
 
+  // Consent declaration for the whole import (compliance rule 1 —
+  // captured at the source, never inferred). Defaults to "unknown"
+  // so a user who blows past this section without thinking about it
+  // gets a truthful record, not a fabricated "explicit".
+  const [saveBookConsentStatus, setSaveBookConsentStatus] =
+    React.useState<"explicit" | "imported" | "unknown">("unknown");
+  const [saveBookConsentSource, setSaveBookConsentSource] = React.useState("");
+  const [saveBookConsentDate, setSaveBookConsentDate] = React.useState("");
+
   // Step 4 — send timing (Phase 6). Defaults to "send now" so existing
   // muscle memory still works.
   const [sendTiming, setSendTiming] = React.useState<SendTimingState>(() => {
@@ -455,6 +464,19 @@ export function WizardSend() {
           })),
         defaultCountryCode,
         groupName: saveBookGroupName.trim() || undefined,
+        fileName: parsed?.fileName,
+        // Only send declaredConsentStatus when the user picked
+        // something other than the default "unknown" — an omitted
+        // field leaves new rows at the schema default (also
+        // "unknown"), and doesn't overwrite the consent basis of
+        // any row that's already been declared "explicit".
+        ...(saveBookConsentStatus !== "unknown"
+          ? { declaredConsentStatus: saveBookConsentStatus }
+          : {}),
+        declaredSource: saveBookConsentSource.trim() || null,
+        declaredDate: saveBookConsentDate
+          ? `${saveBookConsentDate}T00:00:00.000Z`
+          : null,
       };
       const r = await fetch("/api/contacts/import", {
         method: "POST",
@@ -820,16 +842,76 @@ export function WizardSend() {
                   Save these contacts to my Contact Book
                 </label>
                 {saveToBook && (
-                  <div className="pl-6 max-w-md">
-                    <Label htmlFor="save-group" className="block mb-1.5 text-xs">
-                      Group name (optional — creates a new group, or omit to save without grouping)
-                    </Label>
-                    <Input
-                      id="save-group"
-                      value={saveBookGroupName}
-                      onChange={(e) => setSaveBookGroupName(e.target.value)}
-                      placeholder="e.g. April 2026 Cohort"
-                    />
+                  <div className="pl-6 max-w-lg space-y-3">
+                    <div>
+                      <Label htmlFor="save-group" className="block mb-1.5 text-xs">
+                        Group name (optional — creates a new group, or omit to save without grouping)
+                      </Label>
+                      <Input
+                        id="save-group"
+                        value={saveBookGroupName}
+                        onChange={(e) => setSaveBookGroupName(e.target.value)}
+                        placeholder="e.g. April 2026 Cohort"
+                      />
+                    </div>
+
+                    {/* Consent declaration for the whole import.
+                        This is the "declare it for the file" path
+                        from the spec — covers the common case of
+                        one list, one source. Individual rows can
+                        still be updated later via Contact edit. */}
+                    <div className="pt-2 border-t border-zinc-200">
+                      <Label htmlFor="save-consent" className="block mb-1.5 text-xs">
+                        How did these contacts consent to messages?
+                      </Label>
+                      <select
+                        id="save-consent"
+                        value={saveBookConsentStatus}
+                        onChange={(e) =>
+                          setSaveBookConsentStatus(
+                            e.target.value as "explicit" | "imported" | "unknown"
+                          )
+                        }
+                        className="w-full h-9 px-3 rounded-md border border-zinc-300 bg-white text-sm"
+                      >
+                        <option value="unknown">Unknown — I&apos;ll set this per contact later</option>
+                        <option value="explicit">Explicit — they opted in directly (form, verbal, WhatsApp)</option>
+                        <option value="imported">Imported — moved from another list where they opted in</option>
+                      </select>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        This applies to every row being saved. Contacts already in
+                        the book keep whatever they had unless it&apos;s currently
+                        &ldquo;unknown&rdquo; — we never downgrade an existing
+                        consent basis.
+                      </p>
+                    </div>
+
+                    {saveBookConsentStatus !== "unknown" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <Label htmlFor="save-source" className="block mb-1.5 text-xs">
+                            Source (optional)
+                          </Label>
+                          <Input
+                            id="save-source"
+                            value={saveBookConsentSource}
+                            onChange={(e) => setSaveBookConsentSource(e.target.value)}
+                            placeholder="e.g. In-store signup sheet"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="save-date" className="block mb-1.5 text-xs">
+                            Date (optional)
+                          </Label>
+                          <Input
+                            id="save-date"
+                            type="date"
+                            value={saveBookConsentDate}
+                            onChange={(e) => setSaveBookConsentDate(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -845,6 +927,27 @@ export function WizardSend() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Consent advisory. Fires only when the user hasn't
+                  declared a consent basis for this list. We don't
+                  block sends on unverified consent (per spec: flag,
+                  don't block) — this is the "flag" surface. */}
+              {saveToBook && saveBookConsentStatus === "unknown" && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <strong>Heads up:</strong> you&apos;re saving these contacts
+                  with consent status <em>unknown</em>. The messages will
+                  still send, but each new contact will show as
+                  &ldquo;unverified consent&rdquo; on the compliance dashboard
+                  until you set a basis (per contact or per import).
+                </div>
+              )}
+              {!saveToBook && (
+                <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-muted-foreground">
+                  These recipients aren&apos;t being saved to your Contact
+                  Book, so consent won&apos;t be recorded for them. Tick
+                  &ldquo;Save these contacts&rdquo; above to declare a source.
+                </div>
+              )}
+
               <ContactReviewTable
                 parsed={parsed}
                 phoneColumn={phoneColumn}

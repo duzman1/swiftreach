@@ -119,6 +119,9 @@ model User {
   reportGenerations  ReportGeneration[]
   clients            Client[]
   audiences          Audience[]
+  contactImports     ContactImport[]
+  suppressionLogs    SuppressionLog[]
+  doNotContacts      DoNotContact[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -149,6 +152,7 @@ model Campaign {
   createdAt    DateTime  @default(now())
   completedAt  DateTime?
   contacts     Contact[]
+  suppressionLogs SuppressionLog[]
 
   // Post-campaign analysis: set when the alert engine has run for
   // this campaign. Idempotency guard — analysis runs at most once.
@@ -354,10 +358,35 @@ model SavedContact {
   clientId    String?
   client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
+  // ── Consent provenance (compliance monitoring) ────────────────────
+  // consentStatus values: "explicit" | "imported" | "unknown".
+  // Default "unknown". NEVER infer consent — a defaulted row means
+  // "we do not know", NOT "consent was obtained". The whole feature
+  // is worthless if we let defaults silently claim consent.
+  //
+  // consentDate is when consent was OBTAINED (from the source);
+  // consentRecordedAt is when SwiftReach learned about it. These are
+  // different facts and both matter — a contact opted in on paper in
+  // January, imported in March: consentDate=Jan, consentRecordedAt=Mar.
+  consentStatus     String    @default("unknown")
+  consentSource     String?
+  consentDate       DateTime?
+  consentRecordedAt DateTime?
+  consentNote       String?
+
+  // Optional link to the ContactImport that created this row. Nullable
+  // because manual + API contacts don't come from a file, and every
+  // pre-existing row predates this feature. Import history is the
+  // ONLY thing that promotes a contact past consentStatus="unknown"
+  // via automated backfill — we don't fabricate provenance.
+  importId    String?
+  import      ContactImport? @relation(fields: [importId], references: [id], onDelete: SetNull)
+
   @@unique([userId, phoneNumber])
   @@index([userId])
   @@index([userId, optedOut])
   @@index([userId, clientId])
+  @@index([userId, consentStatus])
 }
 
 // Soft container for grouping contacts ("VIPs", "March Cohort"). Membership
@@ -399,6 +428,11 @@ model OptOutLog {
   // lib/report/reportData.ts's top comment for the full rule.
   campaignId  String?
   campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  // Back-ref for DoNotContact.sourceOptOutId — an OptOutLog row may
+  // have promoted itself into a persistent DNC entry (or several,
+  // if the same phone opted out on multiple accounts historically).
+  doNotContacts DoNotContact[]
 
   @@index([userId])
   @@index([userId, createdAt])
@@ -572,6 +606,7 @@ model Automation {
 
   // Contact configuration
   contacts         AutomationContact[]
+  suppressionLogs  SuppressionLog[]
   phoneColumn      String
   dateColumn       String
   defaultCountryCode String  @default("1")
@@ -754,5 +789,109 @@ model Audience {
   scheduledCampaigns ScheduledCampaign[]
 
   @@unique([userId, name])
+  @@index([userId])
+}
+
+// ── Compliance monitoring ────────────────────────────────────────────
+// See docs at each model. This whole block backs SwiftReach's
+// "consent-first" claim with evidence. Available on every plan
+// including Free — compliance is protection, not an upsell — so
+// nothing in these tables is gated by hasFeature().
+
+// One row per CSV/xlsx/Google-Drive import. Created at import time
+// with the file name and who uploaded it. Every SavedContact row the
+// import creates points back via importId, so a contact's provenance
+// survives even if the file has since been deleted from wherever it
+// came from. Import history is the ONLY thing that promotes a
+// contact past consentStatus="unknown" via backfill — we do not
+// fabricate provenance from nothing (rule 1).
+model ContactImport {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName          String
+  uploadedByUserId  String   // Clerk id of the human who did the upload
+  uploadedAt        DateTime @default(now())
+
+  // The consent declaration attached to the whole import. When the
+  // wizard offers "these all came from our signup sheet, dated Feb",
+  // it's captured here — every SavedContact created by this import
+  // inherits it into its own consent* fields. Nullable because a user
+  // may (regrettably) leave the import undeclared; that path yields
+  // consentStatus="unknown" on every row, not a lie.
+  declaredSource    String?
+  declaredDate      DateTime?
+  declaredNote      String?
+
+  contacts SavedContact[]
+
+  @@index([userId, uploadedAt])
+}
+
+// Append-only audit trail of every send SwiftReach refused to
+// dispatch. Written by lib/checkSuppression.ts, the single
+// enforcement helper that EVERY send path funnels through:
+//   - campaign send loop
+//   - scheduled-campaign materialisation
+//   - automation engine (finding 4 — was previously ungated)
+//   - inbox reply
+//   - single-message send (test-send)
+//   - webhook / API-triggered send
+//
+// This table is the evidence a STOP was honoured. Keep it forever.
+// Deleting a Campaign/Automation sets those FKs null but the row
+// itself stays — the audit outlives the trigger.
+model SuppressionLog {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phoneNumber  String
+  campaignId   String?
+  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  automationId String?
+  automation   Automation? @relation(fields: [automationId], references: [id], onDelete: SetNull)
+
+  // What kind of send tried to fire — used by the compliance
+  // dashboard to answer "which surfaces are we suppressing on?".
+  // Enum-like string: "campaign" | "scheduled" | "automation" |
+  // "inbox_reply" | "single_send" | "webhook".
+  surface      String
+
+  // Why we suppressed. Enum-like string. Today: "opted_out" |
+  // "do_not_contact" | "invalid_number". Add values as new
+  // suppression causes appear.
+  reason       String
+
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, phoneNumber])
+  @@index([campaignId])
+  @@index([automationId])
+}
+
+// Phone-level do-not-contact list, scoped to userId. Persistent
+// across contact deletion + re-import — this is the whole point.
+// Today, opt-out state lives on the SavedContact row: delete the
+// contact + re-upload the same phone via CSV = the opt-out is lost
+// and we message someone who said STOP. Never again.
+//
+// Every send path checks DNC BEFORE consulting SavedContact.optedOut.
+// A row here overrides anything the contact record says. Every
+// opt-out write to lib/optOut.ts also inserts here.
+model DoNotContact {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phoneNumber     String
+  // "opted_out" (STOP keyword or manual toggle), "manual" (added
+  // by the user from the compliance dashboard), "bounce" (Meta
+  // hard-bounced repeatedly). Extensible.
+  reason          String
+  sourceOptOutId  String?
+  sourceOptOut    OptOutLog? @relation(fields: [sourceOptOutId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+
+  @@unique([userId, phoneNumber])
   @@index([userId])
 }

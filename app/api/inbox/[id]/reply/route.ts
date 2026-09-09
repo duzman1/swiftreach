@@ -20,6 +20,7 @@ import {
 } from "@/lib/whatsapp";
 import { checkMessageLimit, incrementMessageUsage } from "@/lib/usageCheck";
 import { logError } from "@/lib/errorLog";
+import { checkSuppression } from "@/lib/checkSuppression";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,31 @@ export async function POST(
 
     const inbound = await prisma.inboundMessage.findUnique({ where: { id: params.id } });
     if (!inbound || inbound.userId !== userId) return bad("Message not found", 404);
+
+    // Compliance (finding 5). If this contact has opted out or is on
+    // the DNC list, refuse the reply — even a manual reply is a
+    // compliance violation. Return 409 with a clear message; the
+    // inbox UI renders it inline. This is intentionally NOT a silent
+    // no-op: a message that vanishes reads as a bug (per user).
+    const suppression = await checkSuppression(prisma, {
+      userId,
+      phoneNumber: inbound.fromPhone,
+      surface: "inbox_reply",
+    });
+    if (suppression.suppress) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "SUPPRESSED",
+          reason: suppression.reason,
+          error:
+            suppression.reason === "do_not_contact"
+              ? `${inbound.fromPhone} is on your do-not-contact list. Their opt-out is permanent unless you remove them in Settings → Compliance. Reply blocked.`
+              : `${inbound.fromPhone} has opted out. Replies to opted-out contacts are blocked. Un-opt them in the Contact Book to reply.`,
+        },
+        { status: 409 }
+      );
+    }
 
     // Plan-limit re-check — replies count against the same monthly cap as
     // campaign sends (Phase 6 critical rules #6 + Phase 4 invariant).

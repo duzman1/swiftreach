@@ -18,6 +18,7 @@ import { buildMessage, type FormatRule } from "./buildMessage";
 import { normalizePhone, isValidPhone } from "./phoneUtils";
 import type { VariableMapping } from "./whatsapp";
 import { resolveAudienceToRows, AudienceResolveError } from "./resolveAudienceContacts";
+import { loadSuppressedSet, classifySuppressions, logSuppressed } from "./checkSuppression";
 
 interface ScheduledLike {
   id: string;
@@ -107,13 +108,11 @@ export async function materializeScheduledCampaign(
 
   const filteredRows = applyFilters(rows, filters);
 
-  // ── Opt-out lookup: pull every opted-out phone for this user up front
-  // so per-row checks are a Set membership test, not N queries.
-  const optedOut = await prisma.savedContact.findMany({
-    where: { userId: scheduled.userId, optedOut: true },
-    select: { phoneNumber: true },
-  });
-  const optedOutSet = new Set(optedOut.map((o) => o.phoneNumber));
+  // Unified suppression set (DoNotContact ∪ SavedContact.optedOut).
+  // Same helper the campaign + automation paths use — consistent
+  // behaviour across every send surface.
+  const suppressedSet = await loadSuppressedSet(prisma, scheduled.userId);
+  const suppressedPhonesThisRun: string[] = [];
 
   const contactsData: Prisma.ContactCreateManyCampaignInput[] = filteredRows.map(
     (row) => {
@@ -145,9 +144,10 @@ export async function materializeScheduledCampaign(
       let errorMessage: string | null = null;
       if (!phoneValid) {
         status = "invalid";
-      } else if (optedOutSet.has(phone)) {
+      } else if (suppressedSet.has(phone)) {
         status = "skipped";
         errorMessage = "Contact has opted out";
+        suppressedPhonesThisRun.push(phone);
       }
 
       return {
@@ -189,6 +189,32 @@ export async function materializeScheduledCampaign(
     },
     select: { id: true },
   });
+
+  // Compliance audit — log every suppressed phone this scheduled run
+  // refused. Done AFTER campaign.create so campaignId is available on
+  // each log row for the compliance dashboard to link back. Runs
+  // best-effort; a logging failure does not fail the materialisation.
+  if (suppressedPhonesThisRun.length > 0) {
+    try {
+      const reasons = await classifySuppressions(
+        prisma,
+        scheduled.userId,
+        suppressedPhonesThisRun
+      );
+      await logSuppressed(
+        prisma,
+        suppressedPhonesThisRun.map((phone) => ({
+          userId: scheduled.userId,
+          phoneNumber: phone,
+          surface: "scheduled",
+          reason: reasons.get(phone) ?? "opted_out",
+          campaignId: campaign.id,
+        }))
+      );
+    } catch {
+      /* audit failure is non-fatal — the contacts are already marked skipped */
+    }
+  }
 
   return { campaignId: campaign.id, totalCount, skippedCount };
 }

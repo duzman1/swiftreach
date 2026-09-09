@@ -30,6 +30,7 @@ import {
   type WhatsAppCredentials,
   type SendError,
 } from "@/lib/whatsapp";
+import { checkSuppression } from "@/lib/checkSuppression";
 
 export const dynamic = "force-dynamic";
 
@@ -379,6 +380,42 @@ export async function POST(request: NextRequest) {
       phoneNumberId: userRow.whatsappPhoneNumberId,
       apiVersion: userRow.whatsappApiVersion ?? DEFAULT_API_VERSION,
     };
+
+    // Compliance (finding 7). Webhook-triggered sends were previously
+    // ungated. A Zap that fires on new form submissions can easily
+    // include a phone that had earlier texted STOP — we must refuse.
+    // Returns 409 with a structured error so the calling platform
+    // (Zapier / Make / custom code) sees a clear "why" and can branch.
+    const suppression = await checkSuppression(prisma, {
+      userId: auth.userId,
+      phoneNumber: normalizedPhone,
+      surface: "webhook",
+    });
+    if (suppression.suppress) {
+      const msg =
+        suppression.reason === "do_not_contact"
+          ? `${normalizedPhone} is on this user's do-not-contact list. Send refused.`
+          : `${normalizedPhone} has opted out of messages from this account. Send refused.`;
+      // The WebhookLog status enum doesn't have "suppressed" today —
+      // classify as "invalid" (semantically: request refused before
+      // Meta ever saw it) and put the actual reason in errorMessage.
+      // SuppressionLog carries the compliance audit; WebhookLog is
+      // just per-request debugging for the API caller.
+      await writeLog({
+        apiKeyId: auth.apiKeyId,
+        userId: auth.userId,
+        body,
+        status: "invalid",
+        errorMessage: `Suppressed: ${msg}`,
+        responseTimeMs: Date.now() - startTime,
+      });
+      return errorResponse(
+        msg,
+        409,
+        { reason: suppression.reason, code: "SUPPRESSED" },
+        rateHeaders(rl)
+      );
+    }
 
     // Step 5 — send via existing whatsapp.ts helpers (axios under the
     // hood; same retry/error parsing as the campaign send loop).

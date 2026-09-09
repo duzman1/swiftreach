@@ -22,6 +22,7 @@ import {
   Sparkles,
   Menu,
   X,
+  ShieldCheck,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -67,6 +68,9 @@ const SECTIONS: { items: NavItem[] }[] = [
       { href: "/support", label: "Support", icon: LifeBuoy },
       { href: "/billing", label: "Billing", icon: CreditCard },
       { href: "/settings/api-keys", label: "API Keys", icon: Code2, paidOnly: true, requiresPlan: "Starter" },
+      // Compliance dashboard — every plan (including Free) because
+      // consent enforcement is protection, never an upsell.
+      { href: "/settings/compliance", label: "Compliance", icon: ShieldCheck },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
