@@ -156,7 +156,12 @@ export const PLANS: Record<PlanId, Plan> = {
       scheduledCampaigns: true,
       fullAnalytics: true,
       analyticsExport: false,
-      savedAudiences: true,
+      // savedAudiences stays FALSE until the rule-builder ships.
+      // The pricing table had it checked from launch but no data
+      // model, API, or UI existed — audit confirmed zero saved
+      // audiences across every account. Flipping this back to true
+      // is the last step of the build-out.
+      savedAudiences: false,
       whiteLabelReports: false,
       perClientReporting: false,
       customOnboarding: false,
@@ -186,7 +191,10 @@ export const PLANS: Record<PlanId, Plan> = {
       scheduledCampaigns: true,
       fullAnalytics: true,
       analyticsExport: true,
-      savedAudiences: true,
+      // savedAudiences stays FALSE on Pro too — see the Growth
+      // comment. Both flip true in the final commit of the
+      // saved-audiences build-out.
+      savedAudiences: false,
       whiteLabelReports: true,
       // Per-client tagging + analytics filter + per-client PDF report
       // shipped. Comparison-table row + Pro card bullet now render ✓.
