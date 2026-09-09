@@ -5,12 +5,86 @@
 //   loadRangeReport(userId, range, clientId?)
 //
 // Both return the same ReportData interface so the react-pdf template
-// doesn't need to know which entry point produced it. clientId is a
-// forward-compat filter (defaults to "all campaigns"); client tagging
-// isn't built yet — the filter is here so adding it later is a
-// one-line prisma where clause change and nothing else.
+// doesn't need to know which entry point produced it.
 //
+// ─────────────────────────────────────────────────────────────────
+// CLIENT SCOPING RULE — READ THIS BEFORE CHANGING FILTER LOGIC
+// ─────────────────────────────────────────────────────────────────
+// The per-client filter scopes by **Campaign.clientId ONLY** for
+// EVERY number in this report and in the analytics endpoints —
+// including opt-outs. There is no exception, no fallback to
+// SavedContact.clientId, and no phone-number join.
+//
+// Concretely, for a range report filtered to Client A:
+//   * Campaigns loaded    = Campaign where userId AND clientId = A
+//   * Recipients counted  = every Contact row of those campaigns,
+//                           regardless of what SavedContact.clientId
+//                           any given recipient carries
+//   * Delivered/failed    = same, from Contact timestamps
+//   * Opt-outs counted    = OptOutLog where campaign.clientId = A
+//                           (attribution set at OPT-OUT TIME — see
+//                           lib/optOut.ts.attributeOptOut for how)
+//
+// Example — a campaign labelled Client A with 500 recipients,
+// where 200 of those recipients' SavedContact rows are labelled
+// Client B: the Client A report counts all 500. The Client B
+// report counts 0 (Client B has no campaigns of its own). If any
+// of those 500 opt out, the opt-out lands on Client A's report,
+// not Client B's — the attribution is to the SEND that caused it,
+// not to any label the recipient carries in some other system.
+//
+// Opt-out attribution: 30-day lookback (why)
+// ─────────────────────────────────────────
+// At opt-out time, lib/optOut.ts looks for the most recent
+// Contact.sentAt for this (userId, phoneNumber) at or before the
+// opt-out, within OPT_OUT_ATTRIBUTION_LOOKBACK_DAYS = 30. The
+// campaign of that send becomes OptOutLog.campaignId. If nothing
+// matches within the window, campaignId stays null.
+//
+// 30 days was picked because WhatsApp's customer-service session
+// window is 24 hours — real reactions to a send cluster tightly
+// inside that, and 30 days is enough to capture delayed replies
+// ("I've been meaning to unsubscribe from this list for a couple
+// weeks") without misattributing opt-outs that a March campaign
+// couldn't plausibly have caused in September.
+//
+// Unattributable opt-outs (campaignId = null)
+// ─────────────────────────────────────────
+// Opt-outs whose triggering send falls outside the lookback
+// window, OR whose phone has never been sent to by this account,
+// are excluded from every client-filtered count. They still appear
+// in the unfiltered view — the compliance record itself is intact.
+// If an agency asks "why did Client A's opt-out count drop this
+// month," the answer may be that a campaign got hard-deleted (see
+// next paragraph) or that opt-outs from a January send landed
+// past the March lookback and became unattributable.
+//
+// Campaign deletion and orphaned opt-outs
+// ─────────────────────────────────────────
+// OptOutLog.campaignId is an ON DELETE SET NULL foreign key on
+// Campaign.id. Hard-deleting a campaign clears the attribution
+// on every opt-out that was linked to it — those rows drop out
+// of every client-filtered report and remain in the unfiltered
+// view. This is deliberate: the compliance record (someone said
+// STOP) must survive the campaign's deletion, but the "for which
+// job did this happen" attribution is a downstream concern that
+// legitimately clears when the job goes away.
+//
+// If a client filter's opt-out count falls unexpectedly, the two
+// possible causes are: (a) a labelled campaign was deleted and
+// its opt-outs became unattributable, or (b) the attribution
+// window (30d) elapsed for an old send. Both are documented and
+// intended; neither is a data-loss event.
+//
+// Consequence — a campaign that was never labelled is invisible
+// to every client-filtered report. The empty-state message (see
+// CampaignReport.tsx and app/(app)/analytics/page.tsx) surfaces
+// this explicitly rather than silently saying "no campaigns in
+// this period."
+//
+// ─────────────────────────────────────────────────────────────────
 // DELIVERY-RATE DEFINITION
+// ─────────────────────────────────────────────────────────────────
 // Counted from Contact TIMESTAMPS, not status strings:
 //   sent      = Contact.sentAt IS NOT NULL
 //   delivered = Contact.deliveredAt IS NOT NULL
@@ -42,6 +116,15 @@ export interface ReportData {
   kind: "campaign" | "range";
   range: DateRange | null;   // null on single-campaign
   campaign: { id: string; name: string; createdAt: Date } | null;
+  /** Name of the client this report was filtered to. null when no
+   *  client filter was applied (or on single-campaign reports). */
+  clientName: string | null;
+  /** For range reports with a client filter: the total number of
+   *  campaigns in the same period IGNORING the client filter. Lets
+   *  the empty-state cell distinguish "no campaigns in period" from
+   *  "campaigns exist but none labelled with this client". Null on
+   *  single-campaign reports and range reports without a filter. */
+  unfilteredCampaignsInPeriod: number | null;
   summary: {
     campaigns: number;
     messagesSent: number;
@@ -102,19 +185,32 @@ async function optOutCount(
   clientFilter: { clientId?: string | null } = {}
 ): Promise<number> {
   if (!range) return 0;
-  // Client-scoped opt-out counts: OptOutLog isn't client-tagged;
-  // the join goes phoneNumber → SavedContact.clientId. Same shape
-  // the analytics/optouts route uses, so numbers stay consistent.
-  let optOutWhere: { userId: string; phoneNumber?: { in: string[] } } = { userId };
+
+  // Client-scoped opt-out counts now go through OptOutLog.campaignId
+  // (set at insert time by lib/optOut.ts within a bounded lookback
+  // window). This is the same rule as every other filtered number
+  // in the report — Campaign.clientId, no SavedContact-side fallback.
+  //
+  // Rows with campaignId = null are "unattributable" and are
+  // deliberately excluded from every client-filtered count. They
+  // still appear in the unfiltered view (no `campaign` predicate).
   if (Object.keys(clientFilter).length > 0) {
-    const rows = await prisma.savedContact.findMany({
-      where: { userId, ...clientFilter },
-      select: { phoneNumber: true },
+    return prisma.optOutLog.count({
+      where: {
+        userId,
+        createdAt: { gte: range.start, lte: range.end },
+        // Only rows whose owning campaign matches the client filter.
+        // The `is: { …, userId }` guard is belt-and-suspenders — the
+        // outer userId already scopes but a nested campaign check
+        // guarantees no cross-tenant read even if the FK ever drifts.
+        campaign: { is: { userId, ...clientFilter } },
+      },
     });
-    optOutWhere = { userId, phoneNumber: { in: rows.map((r) => r.phoneNumber) } };
   }
+
+  // Unfiltered — count everything, including unattributable rows.
   return prisma.optOutLog.count({
-    where: { ...optOutWhere, createdAt: { gte: range.start, lte: range.end } },
+    where: { userId, createdAt: { gte: range.start, lte: range.end } },
   });
 }
 
@@ -146,6 +242,8 @@ export async function loadCampaignReport(
     kind: "campaign",
     range: null,
     campaign: { id: campaign.id, name: campaign.name, createdAt: campaign.createdAt },
+    clientName: null,
+    unfilteredCampaignsInPeriod: null,
     summary: {
       campaigns: 1,
       messagesSent: c.sent,
@@ -213,9 +311,34 @@ export async function loadRangeReport(
 
   const optOuts = await optOutCount(userId, range, clientFilter);
 
+  // Client-scoped reports resolve the client's name (or an
+  // "Unassigned" placeholder) + the unfiltered campaign count in
+  // the same period. Both feed the filter-aware empty state so a
+  // client-filtered report with zero rows can tell the user "you
+  // sent N campaigns but none were labelled for this client"
+  // instead of the (misleading) "no campaigns sent in this period".
+  let clientName: string | null = null;
+  let unfilteredCampaignsInPeriod: number | null = null;
+  if (clientId) {
+    if (clientId === "unassigned") {
+      clientName = "Unassigned";
+    } else {
+      const c = await prisma.client.findFirst({
+        where: { id: clientId, userId },
+        select: { name: true },
+      });
+      clientName = c?.name ?? null;
+    }
+    unfilteredCampaignsInPeriod = await prisma.campaign.count({
+      where: { userId, createdAt: { gte: range.start, lte: range.end } },
+    });
+  }
+
   return {
     kind: "range",
     range,
+    clientName,
+    unfilteredCampaignsInPeriod,
     campaign: null,
     summary: {
       campaigns: campaigns.length,

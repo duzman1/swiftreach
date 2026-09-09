@@ -17,6 +17,19 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const window = parseRange(url.searchParams);
     const clientFilter = campaignClientFilter(url.searchParams);
+    const hasClientFilter = Object.keys(clientFilter).length > 0;
+
+    // When a client filter is active, also count the same period
+    // unfiltered so the empty-state UI can distinguish "no sends
+    // in this period" from "sends exist but none for this client".
+    const unfilteredInPeriod = hasClientFilter
+      ? await prisma.campaign.count({
+          where: {
+            userId,
+            createdAt: { gte: window.start, lte: window.end },
+          },
+        })
+      : null;
 
     const campaigns = await prisma.campaign.findMany({
       where: {
@@ -73,7 +86,11 @@ export async function GET(req: NextRequest) {
 
     rows.sort((a, b) => b.readRate - a.readRate);
 
-    return NextResponse.json({ ok: true, campaigns: rows });
+    return NextResponse.json({
+      ok: true,
+      campaigns: rows,
+      unfilteredInPeriod, // number when a client filter is active; null otherwise
+    });
   } catch (err) {
     return handleApiError(err, "GET /api/analytics/campaigns");
   }

@@ -19,30 +19,38 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const window = parseRange(url.searchParams);
     const clientFilter = campaignClientFilter(url.searchParams);
+    const hasClientFilter = Object.keys(clientFilter).length > 0;
 
     const startOfMonth = new Date();
     startOfMonth.setUTCDate(1);
     startOfMonth.setUTCHours(0, 0, 0, 0);
 
-    // When a client filter is active, restrict opt-outs to those from
-    // SavedContacts labelled with that client. OptOutLog isn't
-    // client-tagged directly; the join goes phoneNumber → SavedContact.
-    let optOutPhones: string[] | null = null;
-    if (Object.keys(clientFilter).length > 0) {
-      const rows = await prisma.savedContact.findMany({
-        where: { userId, ...clientFilter },
-        select: { phoneNumber: true },
-      });
-      optOutPhones = rows.map((r) => r.phoneNumber);
-    }
-    const optOutBase = optOutPhones
-      ? { userId, phoneNumber: { in: optOutPhones } }
+    // Client-scoped opt-out queries now go through OptOutLog.campaignId
+    // → Campaign.clientId — the same single scoping rule the rest of
+    // the report uses. See lib/report/reportData.ts's header comment.
+    // Rows with OptOutLog.campaignId = null are unattributable and
+    // are excluded from every client-filtered count; they still show
+    // in the unfiltered view.
+    const optOutBase = hasClientFilter
+      ? { userId, campaign: { is: { userId, ...clientFilter } } }
       : { userId };
 
+    // totalOptedOut for a client filter = distinct phones with any
+    // attributable opt-out on a matching campaign. Without a filter
+    // we keep the SavedContact-side count for backwards compat with
+    // the existing dashboard tile ("total contacts who ever opted out").
+    const totalOptedOutQuery = hasClientFilter
+      ? prisma.optOutLog
+          .findMany({
+            where: optOutBase,
+            select: { phoneNumber: true },
+            distinct: ["phoneNumber"],
+          })
+          .then((rows) => rows.length)
+      : prisma.savedContact.count({ where: { userId, optedOut: true } });
+
     const [totalOptedOut, thisMonth, inRange, sentInRange] = await Promise.all([
-      prisma.savedContact.count({
-        where: { userId, ...clientFilter, optedOut: true },
-      }),
+      totalOptedOutQuery,
       prisma.optOutLog.count({
         where: { ...optOutBase, createdAt: { gte: startOfMonth } },
       }),

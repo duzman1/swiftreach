@@ -43,7 +43,11 @@ function badRequest(message: string) {
 
 // GET — list the current user's campaigns. Accepts ?clientId= to
 // narrow the list to a single client, or ?clientId=unassigned for
-// campaigns with no label.
+// campaigns with no label. ?idsOnly=1 returns just the ids of every
+// row matching the current filter (capped) — used by the campaigns
+// page's "Select all N matching" bulk-selection flow.
+const IDS_ONLY_CAP = 500;
+
 export async function GET(req: NextRequest) {
   try {
     const userId = await requireUserId();
@@ -55,6 +59,26 @@ export async function GET(req: NextRequest) {
         : raw
           ? { clientId: raw }
           : {};
+
+    if (url.searchParams.get("idsOnly") === "1") {
+      const total = await prisma.campaign.count({
+        where: { userId, ...clientFilter },
+      });
+      const rows = await prisma.campaign.findMany({
+        where: { userId, ...clientFilter },
+        orderBy: { createdAt: "desc" },
+        take: IDS_ONLY_CAP,
+        select: { id: true },
+      });
+      return NextResponse.json({
+        ok: true,
+        ids: rows.map((r) => r.id),
+        total,
+        capped: total > IDS_ONLY_CAP,
+        cap: IDS_ONLY_CAP,
+      });
+    }
+
     const campaigns = await prisma.campaign.findMany({
       where: { userId, ...clientFilter },
       orderBy: { createdAt: "desc" },
