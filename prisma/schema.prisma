@@ -173,6 +173,8 @@ model Campaign {
   clientId String?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
+  optOuts  OptOutLog[]
+
   @@index([userId])
   @@index([userId, clientId])
 }
@@ -200,6 +202,10 @@ model Contact {
 
   @@index([campaignId])
   @@index([whatsappMsgId])
+  // Backs the opt-out attribution lookup in lib/optOut.ts (find
+  // the most recent send to this phone within the lookback window).
+  // Also useful for any future "when did we last message X" query.
+  @@index([phoneNumber, sentAt])
 }
 
 model MessageTemplate {
@@ -360,8 +366,22 @@ model OptOutLog {
   source      String   @default("whatsapp")
   createdAt   DateTime @default(now())
 
+  // Campaign this opt-out is attributed TO. Populated at insert
+  // time by lib/optOut.ts, which looks up the most recent
+  // Contact.sentAt for this (userId, phoneNumber) within a bounded
+  // lookback window; opt-outs outside that window (or with no
+  // matching send at all) leave campaignId null and are excluded
+  // from every client-filtered report. onDelete: SetNull because
+  // the compliance record must survive campaign deletion — the
+  // opt-out row stays, its client attribution just clears. See
+  // lib/report/reportData.ts's top comment for the full rule.
+  campaignId  String?
+  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
   @@index([userId])
   @@index([userId, createdAt])
+  @@index([campaignId])
+  @@index([userId, phoneNumber, createdAt])
 }
 
 // ── Phase 6: two-way messaging (inbox) ───────────────────────────────────

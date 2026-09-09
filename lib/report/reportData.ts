@@ -141,19 +141,32 @@ async function optOutCount(
   clientFilter: { clientId?: string | null } = {}
 ): Promise<number> {
   if (!range) return 0;
-  // Client-scoped opt-out counts: OptOutLog isn't client-tagged;
-  // the join goes phoneNumber → SavedContact.clientId. Same shape
-  // the analytics/optouts route uses, so numbers stay consistent.
-  let optOutWhere: { userId: string; phoneNumber?: { in: string[] } } = { userId };
+
+  // Client-scoped opt-out counts now go through OptOutLog.campaignId
+  // (set at insert time by lib/optOut.ts within a bounded lookback
+  // window). This is the same rule as every other filtered number
+  // in the report — Campaign.clientId, no SavedContact-side fallback.
+  //
+  // Rows with campaignId = null are "unattributable" and are
+  // deliberately excluded from every client-filtered count. They
+  // still appear in the unfiltered view (no `campaign` predicate).
   if (Object.keys(clientFilter).length > 0) {
-    const rows = await prisma.savedContact.findMany({
-      where: { userId, ...clientFilter },
-      select: { phoneNumber: true },
+    return prisma.optOutLog.count({
+      where: {
+        userId,
+        createdAt: { gte: range.start, lte: range.end },
+        // Only rows whose owning campaign matches the client filter.
+        // The `is: { …, userId }` guard is belt-and-suspenders — the
+        // outer userId already scopes but a nested campaign check
+        // guarantees no cross-tenant read even if the FK ever drifts.
+        campaign: { is: { userId, ...clientFilter } },
+      },
     });
-    optOutWhere = { userId, phoneNumber: { in: rows.map((r) => r.phoneNumber) } };
   }
+
+  // Unfiltered — count everything, including unattributable rows.
   return prisma.optOutLog.count({
-    where: { ...optOutWhere, createdAt: { gte: range.start, lte: range.end } },
+    where: { userId, createdAt: { gte: range.start, lte: range.end } },
   });
 }
 
