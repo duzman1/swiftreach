@@ -14,7 +14,7 @@ import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { isUserSuspended, suspendedResponse } from "@/lib/suspendCheck";
 import { requirePaidPlan } from "@/lib/planGate";
-import { materializeScheduledCampaign } from "@/lib/materializeScheduled";
+import { materializeScheduledCampaign, ScheduledMaterializeError } from "@/lib/materializeScheduled";
 import { computeNextRunAt } from "@/lib/recurrence";
 
 export const dynamic = "force-dynamic";
@@ -39,10 +39,27 @@ export async function POST(
 
     // Materialise into a real Campaign + Contact[] graph. The user then
     // navigates to /campaigns/[id] which streams the SSE send.
-    const { campaignId, totalCount, skippedCount } = await materializeScheduledCampaign(
-      prisma,
-      sched
-    );
+    let campaignId: string;
+    let totalCount: number;
+    let skippedCount: number;
+    try {
+      const out = await materializeScheduledCampaign(prisma, sched);
+      campaignId = out.campaignId;
+      totalCount = out.totalCount;
+      skippedCount = out.skippedCount;
+    } catch (err) {
+      // Audience-driven schedules can refuse to fire (audience
+      // deleted / currently empty). Surface the specific reason so
+      // the user knows to fix the audience — don't fall back to
+      // sending a stale set.
+      if (err instanceof ScheduledMaterializeError) {
+        return NextResponse.json(
+          { ok: false, error: err.message, code: err.code },
+          { status: 409 }
+        );
+      }
+      throw err;
+    }
 
     // Update scheduling state.
     const now = new Date();

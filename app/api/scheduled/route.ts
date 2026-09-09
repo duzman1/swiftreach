@@ -12,6 +12,7 @@ import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { isUserSuspended, suspendedResponse } from "@/lib/suspendCheck";
 import { requirePaidPlan } from "@/lib/planGate";
+import { hasFeature } from "@/lib/plans";
 import type { VariableMapping } from "@/lib/whatsapp";
 import type { FormatRule } from "@/lib/buildMessage";
 
@@ -26,9 +27,13 @@ interface CreateScheduledBody {
   variableMap?: VariableMapping[];
   staticVars?: Record<string, string>;
   formatRules?: Record<string, FormatRule>;
-  phoneColumn: string;
+  phoneColumn?: string;
   delayMs?: number;
-  contacts: Array<Record<string, string>>;
+  // Legacy snapshot path: contacts frozen at schedule time.
+  contacts?: Array<Record<string, string>>;
+  // Late-binding audience path: rules resolved at fire time so the
+  // sent set matches contacts as they are then, not now.
+  audienceId?: string | null;
   scheduledFor: string; // ISO
   timezone?: string;
   recurring?: boolean;
@@ -71,15 +76,58 @@ export async function POST(req: NextRequest) {
 
     if (!body.name?.trim()) return bad("Missing campaign name");
     if (body.mode !== "freeform" && body.mode !== "template") return bad("Invalid mode");
-    if (!body.phoneColumn) return bad("Missing phoneColumn");
-    if (!Array.isArray(body.contacts) || body.contacts.length === 0) {
-      return bad("contacts[] is required and must be non-empty");
-    }
     if (body.mode === "freeform" && !body.rawMessage?.trim()) {
       return bad("Mode 'freeform' requires rawMessage");
     }
     if (body.mode === "template" && !body.templateName) {
       return bad("Mode 'template' requires templateName");
+    }
+
+    // Source shape: audienceId (late-bound) OR contacts[] snapshot.
+    // Audience path takes precedence when both are sent.
+    const useAudience = Boolean(body.audienceId);
+    let phoneColumn: string;
+    let contactSnapshot: Array<Record<string, string>>;
+    let audienceId: string | null = null;
+
+    if (useAudience) {
+      // Plan gate — a downgraded user shouldn't be able to schedule
+      // a campaign against a saved audience, even if they'd created
+      // audiences on a prior plan.
+      const owner = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { plan: true },
+      });
+      if (!hasFeature(owner?.plan, "savedAudiences")) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Saved audiences require the Growth plan.",
+            upgradeRequired: true,
+            requiredPlan: "growth",
+          },
+          { status: 403 }
+        );
+      }
+      // Verify the audience exists and is owned by this user, but
+      // do NOT resolve or freeze the contact set — the whole point
+      // of the audience path is that resolution happens at fire time.
+      const audience = await prisma.audience.findUnique({
+        where: { id: body.audienceId as string },
+      });
+      if (!audience || audience.userId !== userId) {
+        return bad("Audience not found");
+      }
+      audienceId = audience.id;
+      contactSnapshot = [];
+      phoneColumn = "phoneNumber";
+    } else {
+      if (!body.phoneColumn) return bad("Missing phoneColumn");
+      if (!Array.isArray(body.contacts) || body.contacts.length === 0) {
+        return bad("contacts[] is required and must be non-empty");
+      }
+      contactSnapshot = body.contacts;
+      phoneColumn = body.phoneColumn;
     }
 
     const scheduledFor = new Date(body.scheduledFor);
@@ -112,9 +160,13 @@ export async function POST(req: NextRequest) {
         staticVars: JSON.stringify(body.staticVars ?? {}),
         variableMap: JSON.stringify(body.variableMap ?? []),
         formatRules: JSON.stringify(body.formatRules ?? {}),
-        phoneColumn: body.phoneColumn,
+        phoneColumn,
         delayMs: Math.max(500, Math.min(60000, body.delayMs ?? 2000)),
-        contactListData: JSON.stringify(body.contacts),
+        // Audience path stores []; the materialiser fork keys off
+        // audienceId being non-null and resolves the audience at
+        // fire time. Snapshot path stores the frozen contact set.
+        contactListData: JSON.stringify(contactSnapshot),
+        audienceId,
         status: "scheduled",
         scheduledFor,
         timezone: body.timezone || "America/Los_Angeles",

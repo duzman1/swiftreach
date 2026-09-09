@@ -24,6 +24,15 @@ export interface ParsedFile {
   rows: Row[];                        // each row's values keyed by sanitized header
   columnTypes: Record<string, ColumnType>;
   sanitizedHeaders: SanitizedHeader[]; // headers that were modified during cleanup
+  // When the wizard was populated from a saved audience, this carries
+  // the audience id. The wizard sends it to POST /api/campaigns instead
+  // of `rows`, so the server resolves the LIVE audience at send time.
+  // The `rows` field here is only a review-table preview capped at 500
+  // and is NOT what actually gets sent.
+  audienceId?: string;
+  audienceName?: string;
+  audienceTotal?: number;             // live count (may be > rows.length)
+  audienceCapped?: boolean;           // true if rows was truncated
 }
 
 // Build the cleanup regexes from explicit code points so the source file

@@ -22,7 +22,7 @@ import {
   DEFAULT_API_VERSION,
   type WhatsAppCredentials,
 } from "@/lib/whatsapp";
-import { materializeScheduledCampaign } from "@/lib/materializeScheduled";
+import { materializeScheduledCampaign, ScheduledMaterializeError } from "@/lib/materializeScheduled";
 import { runCampaignSendSafe } from "@/lib/runCampaign";
 import { computeNextRunAt } from "@/lib/recurrence";
 import { logError } from "@/lib/errorLog";
@@ -164,6 +164,41 @@ export async function POST(req: NextRequest) {
         reason: result.reason,
       });
     } catch (err) {
+      // Deliberate no-send from the audience path: fail THIS run
+      // with a clear reason, but if it's a recurring schedule and
+      // the audience just happens to be empty today, keep the
+      // recurrence alive so tomorrow's fire can succeed. A deleted
+      // audience is a permanent failure regardless — no recovery.
+      if (err instanceof ScheduledMaterializeError) {
+        const now = new Date();
+        let nextRunAt: Date | null = null;
+        let nextStatus: string = "failed";
+        if (err.code === "AUDIENCE_EMPTY" && sched.recurring) {
+          nextRunAt = computeNextRunAt({
+            ranAt: now,
+            recurrence: (sched.recurrence as "daily" | "weekly" | "monthly" | null) ?? null,
+            recurrenceDay: sched.recurrenceDay,
+          });
+          if (nextRunAt) nextStatus = "scheduled";
+        }
+        await prisma.scheduledCampaign.update({
+          where: { id: sched.id },
+          data: {
+            status: nextStatus,
+            lastRunAt: now,
+            nextRunAt,
+            scheduledFor: nextRunAt ?? sched.scheduledFor,
+          },
+        });
+        await logError("cron/send-scheduled", err, { userId: sched.userId });
+        outcomes.push({
+          scheduledId: sched.id,
+          userId: sched.userId,
+          status: nextStatus === "scheduled" ? "skipped" : "failed",
+          reason: err.message,
+        });
+        continue;
+      }
       await prisma.scheduledCampaign.update({
         where: { id: sched.id },
         data: { status: "failed" },

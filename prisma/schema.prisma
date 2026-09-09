@@ -118,6 +118,7 @@ model User {
   automations        Automation[]
   reportGenerations  ReportGeneration[]
   clients            Client[]
+  audiences          Audience[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -172,6 +173,15 @@ model Campaign {
   // and its message history intact — the label just clears.
   clientId String?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  // Saved audience this campaign was built from (if any). Set at
+  // resolve time; recorded so a past campaign's recipient count is
+  // explainable even after the audience's rules change. onDelete:
+  // SetNull — deleting an audience must never break a past campaign's
+  // record. audienceResolvedCount snapshots the size at resolve time.
+  audienceId            String?
+  audience              Audience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  audienceResolvedCount Int?
 
   optOuts  OptOutLog[]
 
@@ -290,9 +300,21 @@ model ScheduledCampaign {
   formatRules     String  @default("{}")
   phoneColumn     String
   delayMs         Int     @default(2000)
-  contactListData String  @default("[]") // JSON array of contact row objects
+  contactListData String  @default("[]") // JSON array of contact row objects (snapshot; used when audienceId is null)
   status          String  @default("scheduled")
   // scheduled | running | completed | failed | cancelled
+
+  // Saved audience for LATE binding — membership resolves at cron
+  // fire time, not at schedule time. When audienceId is set,
+  // materializeScheduledCampaign resolves the audience against the
+  // CURRENT SavedContact set and ignores contactListData. When
+  // audienceId is null, the existing contactListData snapshot path
+  // still works (backward compat + one-off scheduled sends from
+  // uploaded CSVs). onDelete: SetNull so deleting an audience
+  // doesn't break the scheduled row — the cron handler falls back
+  // to the snapshot or records a failure with a clear message.
+  audienceId String?
+  audience   Audience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
 
   scheduledFor  DateTime
   timezone      String    @default("America/Los_Angeles")
@@ -676,4 +698,61 @@ model Client {
   @@unique([userId, name])
   @@index([userId])
   @@index([userId, archived])
+}
+
+// Rule-based dynamic segment. Membership is COMPUTED FROM RULES on
+// every read (both the preview endpoint and every send-time
+// resolution) — never persisted as a snapshot of contact ids. That's
+// the point of the feature: an audience stays current as the
+// underlying SavedContact set changes.
+//
+// Rule grammar (stored as JSON in `rules`, v1 shape):
+//   { "op": "AND", "predicates": [
+//       { "field": "group",       "op": "in",          "value": ["<gid>"] },
+//       { "field": "client",      "op": "equals",      "value": "<cid>" },
+//       { "field": "client",      "op": "is_empty" },              // = Unassigned
+//       { "field": "optedOut",    "op": "equals",      "value": false },
+//       { "field": "data.City",   "op": "equals",      "value": "Lagos" },
+//       { "field": "data.Balance","op": "greater_than","value": "500" },
+//     ] }
+//
+// v1 is flat AND across predicates. Operator names match
+// lib/applyFilters.ts exactly (equals, not_equals, contains,
+// greater_than, less_than, is_empty, is_not_empty) so the wizard's
+// ephemeral filter can eventually collapse into this without a
+// vocabulary migration. Nested groups / OR at the top level are
+// deferred until a real user need surfaces.
+//
+// Empty predicate list matches NOTHING. Chosen deliberately: a
+// bulk-messaging tool should never send when the target is
+// ambiguous. Opposite semantic (matches everyone) would let an
+// unfinished audience blast every contact — unrecoverable, quota-
+// burning, Meta-quality damaging. The "user saves an empty
+// audience and gets zero recipients" failure is recoverable and
+// obvious; that's the acceptable side.
+//
+// This is enforced at three layers so no path can silently send
+// to an empty rule set:
+//   1. API POST/PUT rejects rules with zero predicates (400).
+//   2. Wizard blocks selecting an audience that resolves to 0.
+//   3. Send-time (regular + scheduled) refuses if resolved = 0.
+//
+// Opt-out contacts are excluded at SEND TIME regardless of what
+// the rules say. See send-path integration in materializeScheduled
+// + campaigns/POST for the guard.
+model Audience {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  rules       String   // JSON — see grammar above
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaigns          Campaign[]
+  scheduledCampaigns ScheduledCampaign[]
+
+  @@unique([userId, name])
+  @@index([userId])
 }
