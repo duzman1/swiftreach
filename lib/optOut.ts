@@ -7,6 +7,20 @@
 // truth — every send path MUST consult it.
 
 import { prisma } from "./prisma";
+import {
+  OPT_OUT_ATTRIBUTION_LOOKBACK_DAYS,
+  pickAttributedCampaign,
+  type AttributableSend,
+} from "./optOutAttribution";
+
+// Re-export for external callers so they can import from either
+// module. The pure attribution logic + constant live in
+// lib/optOutAttribution.ts (no Prisma dep — unit-testable).
+export {
+  OPT_OUT_ATTRIBUTION_LOOKBACK_DAYS,
+  pickAttributedCampaign,
+  type AttributableSend,
+};
 
 // Keywords are matched case-insensitive against the trimmed message body.
 // We accept the exact form OR with surrounding punctuation/whitespace.
@@ -34,6 +48,43 @@ export function detectOptOutKeyword(text: string): string | null {
 }
 
 /**
+ * Look up the campaign an opt-out should be attributed to by
+ * checking the most recent send to this phone within the
+ * OPT_OUT_ATTRIBUTION_LOOKBACK_DAYS window. Returns null when the
+ * lookup finds no qualifying send (unattributable — the opt-out
+ * still lands in OptOutLog with campaignId=null and will surface
+ * only in unfiltered reports; see reportData.ts scoping-rule
+ * comment).
+ *
+ * Uses the [phoneNumber, sentAt] index on Contact for the lookup;
+ * scans back at most `lookbackDays` from the opt-out time so a
+ * dormant phone doesn't force a full-history scan.
+ */
+export async function attributeOptOut(
+  userId: string,
+  phoneNumber: string,
+  optOutAt: Date
+): Promise<AttributableSend | null> {
+  const cutoff = new Date(
+    optOutAt.getTime() - OPT_OUT_ATTRIBUTION_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+  );
+  const candidates = await prisma.contact.findMany({
+    where: {
+      phoneNumber,
+      sentAt: { gte: cutoff, lte: optOutAt },
+      campaign: { userId },
+    },
+    orderBy: { sentAt: "desc" },
+    take: 1, // pickAttributedCampaign only ever picks the max
+    select: { campaignId: true, sentAt: true },
+  });
+  const sends: AttributableSend[] = candidates
+    .filter((c): c is { campaignId: string; sentAt: Date } => c.sentAt !== null)
+    .map((c) => ({ campaignId: c.campaignId, sentAt: c.sentAt }));
+  return pickAttributedCampaign(sends, optOutAt, OPT_OUT_ATTRIBUTION_LOOKBACK_DAYS);
+}
+
+/**
  * Mark a contact as opted out, log the event, and scrub them from any
  * pending scheduled campaigns belonging to the same user.
  *
@@ -45,6 +96,8 @@ export async function processOptOut(
   keyword: string,
   source: "whatsapp" | "manual" = "whatsapp"
 ): Promise<void> {
+  const now = new Date();
+
   // Upsert SavedContact: if they don't exist yet, create one with optedOut=true
   // so future sends suppress them even if the user never imported them.
   await prisma.savedContact.upsert({
@@ -53,13 +106,18 @@ export async function processOptOut(
       userId,
       phoneNumber,
       optedOut: true,
-      optedOutAt: new Date(),
+      optedOutAt: now,
     },
     update: {
       optedOut: true,
-      optedOutAt: new Date(),
+      optedOutAt: now,
     },
   });
+
+  // Attribute this opt-out to a campaign send if one is within the
+  // lookback window. Attribution failure is a no-op — campaignId
+  // stays null and the row falls out of client-filtered reports.
+  const attributed = await attributeOptOut(userId, phoneNumber, now);
 
   await prisma.optOutLog.create({
     data: {
@@ -67,6 +125,7 @@ export async function processOptOut(
       phoneNumber,
       keyword,
       source,
+      campaignId: attributed?.campaignId ?? null,
     },
   });
 

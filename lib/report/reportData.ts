@@ -11,29 +11,73 @@
 // CLIENT SCOPING RULE — READ THIS BEFORE CHANGING FILTER LOGIC
 // ─────────────────────────────────────────────────────────────────
 // The per-client filter scopes by **Campaign.clientId ONLY** for
-// every campaign-count and message-count in this report and in the
-// analytics endpoints. It does NOT look at SavedContact.clientId
-// for those numbers, and there is no fallback join.
+// EVERY number in this report and in the analytics endpoints —
+// including opt-outs. There is no exception, no fallback to
+// SavedContact.clientId, and no phone-number join.
 //
 // Concretely, for a range report filtered to Client A:
-//   * Campaigns loaded  = Campaign where userId AND clientId = A
-//   * Recipients counted = every Contact row of those campaigns,
-//                          regardless of what SavedContact.clientId
-//                          any given recipient carries
-//   * Delivered/failed  = same as above, from Contact timestamps
+//   * Campaigns loaded    = Campaign where userId AND clientId = A
+//   * Recipients counted  = every Contact row of those campaigns,
+//                           regardless of what SavedContact.clientId
+//                           any given recipient carries
+//   * Delivered/failed    = same, from Contact timestamps
+//   * Opt-outs counted    = OptOutLog where campaign.clientId = A
+//                           (attribution set at OPT-OUT TIME — see
+//                           lib/optOut.ts.attributeOptOut for how)
 //
 // Example — a campaign labelled Client A with 500 recipients,
 // where 200 of those recipients' SavedContact rows are labelled
 // Client B: the Client A report counts all 500. The Client B
-// report counts 0 (Client B has no campaigns of its own).
+// report counts 0 (Client B has no campaigns of its own). If any
+// of those 500 opt out, the opt-out lands on Client A's report,
+// not Client B's — the attribution is to the SEND that caused it,
+// not to any label the recipient carries in some other system.
 //
-// The ONE exception is opt-out counts. OptOutLog rows have no
-// campaignId, so the only way to attribute an opt-out to a client
-// is to join through SavedContact.phoneNumber → SavedContact.
-// clientId. That join is documented inline in optOutCount() below.
+// Opt-out attribution: 30-day lookback (why)
+// ─────────────────────────────────────────
+// At opt-out time, lib/optOut.ts looks for the most recent
+// Contact.sentAt for this (userId, phoneNumber) at or before the
+// opt-out, within OPT_OUT_ATTRIBUTION_LOOKBACK_DAYS = 30. The
+// campaign of that send becomes OptOutLog.campaignId. If nothing
+// matches within the window, campaignId stays null.
 //
-// Consequence — a campaign that was never labelled is invisible to
-// every client-filtered report. The empty-state message (see
+// 30 days was picked because WhatsApp's customer-service session
+// window is 24 hours — real reactions to a send cluster tightly
+// inside that, and 30 days is enough to capture delayed replies
+// ("I've been meaning to unsubscribe from this list for a couple
+// weeks") without misattributing opt-outs that a March campaign
+// couldn't plausibly have caused in September.
+//
+// Unattributable opt-outs (campaignId = null)
+// ─────────────────────────────────────────
+// Opt-outs whose triggering send falls outside the lookback
+// window, OR whose phone has never been sent to by this account,
+// are excluded from every client-filtered count. They still appear
+// in the unfiltered view — the compliance record itself is intact.
+// If an agency asks "why did Client A's opt-out count drop this
+// month," the answer may be that a campaign got hard-deleted (see
+// next paragraph) or that opt-outs from a January send landed
+// past the March lookback and became unattributable.
+//
+// Campaign deletion and orphaned opt-outs
+// ─────────────────────────────────────────
+// OptOutLog.campaignId is an ON DELETE SET NULL foreign key on
+// Campaign.id. Hard-deleting a campaign clears the attribution
+// on every opt-out that was linked to it — those rows drop out
+// of every client-filtered report and remain in the unfiltered
+// view. This is deliberate: the compliance record (someone said
+// STOP) must survive the campaign's deletion, but the "for which
+// job did this happen" attribution is a downstream concern that
+// legitimately clears when the job goes away.
+//
+// If a client filter's opt-out count falls unexpectedly, the two
+// possible causes are: (a) a labelled campaign was deleted and
+// its opt-outs became unattributable, or (b) the attribution
+// window (30d) elapsed for an old send. Both are documented and
+// intended; neither is a data-loss event.
+//
+// Consequence — a campaign that was never labelled is invisible
+// to every client-filtered report. The empty-state message (see
 // CampaignReport.tsx and app/(app)/analytics/page.tsx) surfaces
 // this explicitly rather than silently saying "no campaigns in
 // this period."
