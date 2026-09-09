@@ -286,7 +286,18 @@ export function CampaignReport(props: Props) {
         </Text>
         {data.rows.length === 0 ? (
           <View style={s.empty}>
-            <Text>No campaigns were sent in this period.</Text>
+            {/* Empty-state copy has to distinguish "no sends at all"
+                from "sends exist but none carry this client label" —
+                the second case is the common footgun of the label
+                system and telling the user "no campaigns" here
+                would be a lie. */}
+            <Text>
+              {data.clientName &&
+              typeof data.unfilteredCampaignsInPeriod === "number" &&
+              data.unfilteredCampaignsInPeriod > 0
+                ? `${data.unfilteredCampaignsInPeriod} campaign${data.unfilteredCampaignsInPeriod === 1 ? "" : "s"} were sent in this period, but none are labelled for ${data.clientName}. Assign campaigns to this client from the Campaigns list to include them here.`
+                : "No campaigns were sent in this period."}
+            </Text>
           </View>
         ) : (
           <View style={s.table}>

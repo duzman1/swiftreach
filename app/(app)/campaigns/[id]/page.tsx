@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StatsBar } from "@/components/shared/StatsBar";
 import { CampaignActions } from "@/components/campaigns/CampaignActions";
+import { CampaignClientSelector } from "@/components/campaigns/CampaignClientSelector";
 import { DownloadReportButton } from "@/components/reports/DownloadReportButton";
 import { prisma } from "@/lib/prisma";
 import { requireUser, requireUserId } from "@/lib/auth";
@@ -22,6 +23,7 @@ async function loadCampaign(id: string, userId: string) {
       include: {
         contacts: { orderBy: { id: "asc" } },
         alerts: { orderBy: { createdAt: "asc" } },
+        client: { select: { id: true, name: true, color: true } },
       },
     });
     // Ownership check — refuse to load campaigns belonging to other users.
@@ -50,6 +52,7 @@ export default async function CampaignDetailPage({
   // White-label reports are Pro-only. Below-Pro users don't see the
   // download button at all; the /billing page carries the upgrade CTA.
   const canDownloadReport = hasFeature(user.plan, "whiteLabelReports");
+  const canUseClients = hasFeature(user.plan, "perClientReporting");
 
   const contacts = campaign.contacts;
   // Count delivered/read from TIMESTAMPS, not from `status`. Meta's
@@ -92,6 +95,15 @@ export default async function CampaignDetailPage({
                 <>
                   <span>·</span>
                   <span>Completed {formatDate(campaign.completedAt)}</span>
+                </>
+              )}
+              {canUseClients && (
+                <>
+                  <span>·</span>
+                  <CampaignClientSelector
+                    campaignId={campaign.id}
+                    initialClient={campaign.client}
+                  />
                 </>
               )}
             </div>

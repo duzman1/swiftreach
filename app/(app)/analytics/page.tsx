@@ -114,6 +114,11 @@ export default function AnalyticsPage() {
   const [heatmap, setHeatmap] = useState<HeatmapData | null>(null);
   const [templates, setTemplates] = useState<TemplateRow[] | null>(null);
   const [campaigns, setCampaigns] = useState<CampaignRow[] | null>(null);
+  // When a client filter is active, the campaigns endpoint returns
+  // the same-period count IGNORING the filter — used only for the
+  // empty-state distinction ("no sends at all" vs "sends exist but
+  // none for this client"). null when no filter is applied.
+  const [unfilteredInPeriod, setUnfilteredInPeriod] = useState<number | null>(null);
   const [optouts, setOptouts] = useState<OptOuts | null>(null);
 
   const [sortKey, setSortKey] = useState<keyof CampaignRow>("readRate");
@@ -147,7 +152,12 @@ export default function AnalyticsPage() {
         if (cancelled) return;
         if (s.j?.ok) setSummary(s.j);
         if (v.j?.ok) setVolume(v.j.points);
-        if (c.j?.ok) setCampaigns(c.j.campaigns);
+        if (c.j?.ok) {
+          setCampaigns(c.j.campaigns);
+          setUnfilteredInPeriod(
+            typeof c.j.unfilteredInPeriod === "number" ? c.j.unfilteredInPeriod : null
+          );
+        }
         // Premium panels — 403 means the plan doesn't include fullAnalytics.
         // Show the inline upgrade card; the rest of the page still renders.
         const nextLocked: LockedPanels = {
@@ -414,8 +424,25 @@ export default function AnalyticsPage() {
         </CardHeader>
         <CardContent className="p-0">
           {sortedCampaigns.length === 0 ? (
-            <div className="px-4 py-12 text-center text-muted-foreground text-sm">
-              No campaigns in this window.
+            <div className="px-4 py-12 text-center text-muted-foreground text-sm space-y-2">
+              {clientId && unfilteredInPeriod && unfilteredInPeriod > 0 ? (
+                <>
+                  <p>
+                    <strong>{unfilteredInPeriod.toLocaleString()}</strong> campaign
+                    {unfilteredInPeriod === 1 ? "" : "s"} were sent in this window,
+                    {" "}but none are labelled for this client.
+                  </p>
+                  <p className="text-xs">
+                    Assign campaigns to this client from the{" "}
+                    <Link href="/campaigns" className="underline hover:text-foreground">
+                      Campaigns list
+                    </Link>{" "}
+                    to populate this view.
+                  </p>
+                </>
+              ) : (
+                <p>No campaigns in this window.</p>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">

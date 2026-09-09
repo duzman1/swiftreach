@@ -5,12 +5,42 @@
 //   loadRangeReport(userId, range, clientId?)
 //
 // Both return the same ReportData interface so the react-pdf template
-// doesn't need to know which entry point produced it. clientId is a
-// forward-compat filter (defaults to "all campaigns"); client tagging
-// isn't built yet — the filter is here so adding it later is a
-// one-line prisma where clause change and nothing else.
+// doesn't need to know which entry point produced it.
 //
+// ─────────────────────────────────────────────────────────────────
+// CLIENT SCOPING RULE — READ THIS BEFORE CHANGING FILTER LOGIC
+// ─────────────────────────────────────────────────────────────────
+// The per-client filter scopes by **Campaign.clientId ONLY** for
+// every campaign-count and message-count in this report and in the
+// analytics endpoints. It does NOT look at SavedContact.clientId
+// for those numbers, and there is no fallback join.
+//
+// Concretely, for a range report filtered to Client A:
+//   * Campaigns loaded  = Campaign where userId AND clientId = A
+//   * Recipients counted = every Contact row of those campaigns,
+//                          regardless of what SavedContact.clientId
+//                          any given recipient carries
+//   * Delivered/failed  = same as above, from Contact timestamps
+//
+// Example — a campaign labelled Client A with 500 recipients,
+// where 200 of those recipients' SavedContact rows are labelled
+// Client B: the Client A report counts all 500. The Client B
+// report counts 0 (Client B has no campaigns of its own).
+//
+// The ONE exception is opt-out counts. OptOutLog rows have no
+// campaignId, so the only way to attribute an opt-out to a client
+// is to join through SavedContact.phoneNumber → SavedContact.
+// clientId. That join is documented inline in optOutCount() below.
+//
+// Consequence — a campaign that was never labelled is invisible to
+// every client-filtered report. The empty-state message (see
+// CampaignReport.tsx and app/(app)/analytics/page.tsx) surfaces
+// this explicitly rather than silently saying "no campaigns in
+// this period."
+//
+// ─────────────────────────────────────────────────────────────────
 // DELIVERY-RATE DEFINITION
+// ─────────────────────────────────────────────────────────────────
 // Counted from Contact TIMESTAMPS, not status strings:
 //   sent      = Contact.sentAt IS NOT NULL
 //   delivered = Contact.deliveredAt IS NOT NULL
@@ -42,6 +72,15 @@ export interface ReportData {
   kind: "campaign" | "range";
   range: DateRange | null;   // null on single-campaign
   campaign: { id: string; name: string; createdAt: Date } | null;
+  /** Name of the client this report was filtered to. null when no
+   *  client filter was applied (or on single-campaign reports). */
+  clientName: string | null;
+  /** For range reports with a client filter: the total number of
+   *  campaigns in the same period IGNORING the client filter. Lets
+   *  the empty-state cell distinguish "no campaigns in period" from
+   *  "campaigns exist but none labelled with this client". Null on
+   *  single-campaign reports and range reports without a filter. */
+  unfilteredCampaignsInPeriod: number | null;
   summary: {
     campaigns: number;
     messagesSent: number;
@@ -146,6 +185,8 @@ export async function loadCampaignReport(
     kind: "campaign",
     range: null,
     campaign: { id: campaign.id, name: campaign.name, createdAt: campaign.createdAt },
+    clientName: null,
+    unfilteredCampaignsInPeriod: null,
     summary: {
       campaigns: 1,
       messagesSent: c.sent,
@@ -213,9 +254,34 @@ export async function loadRangeReport(
 
   const optOuts = await optOutCount(userId, range, clientFilter);
 
+  // Client-scoped reports resolve the client's name (or an
+  // "Unassigned" placeholder) + the unfiltered campaign count in
+  // the same period. Both feed the filter-aware empty state so a
+  // client-filtered report with zero rows can tell the user "you
+  // sent N campaigns but none were labelled for this client"
+  // instead of the (misleading) "no campaigns sent in this period".
+  let clientName: string | null = null;
+  let unfilteredCampaignsInPeriod: number | null = null;
+  if (clientId) {
+    if (clientId === "unassigned") {
+      clientName = "Unassigned";
+    } else {
+      const c = await prisma.client.findFirst({
+        where: { id: clientId, userId },
+        select: { name: true },
+      });
+      clientName = c?.name ?? null;
+    }
+    unfilteredCampaignsInPeriod = await prisma.campaign.count({
+      where: { userId, createdAt: { gte: range.start, lte: range.end } },
+    });
+  }
+
   return {
     kind: "range",
     range,
+    clientName,
+    unfilteredCampaignsInPeriod,
     campaign: null,
     summary: {
       campaigns: campaigns.length,

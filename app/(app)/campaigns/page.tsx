@@ -1,7 +1,5 @@
-import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { CampaignListRow } from "@/components/campaigns/CampaignListRow";
+import { CampaignsListClient } from "@/components/campaigns/CampaignsListClient";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { getPlanLimits, getPlanName } from "@/lib/stripe";
@@ -64,11 +62,32 @@ export default async function CampaignsPage({
         ? { clientId: rawClient }
         : {};
 
-  const [campaigns, totalCount] = await Promise.all([
+  const [campaigns, totalCount, unfilteredTotal] = await Promise.all([
     loadCampaigns(user.id, cap, clientFilter),
     isCapped ? countAllCampaigns(user.id, clientFilter) : Promise.resolve(0),
+    // Unfiltered count is used ONLY for the "labelled campaigns
+    // don't exist, but unlabelled ones do" empty state. Skip the
+    // extra query when no filter is active — the campaigns array
+    // itself already tells us the state.
+    canFilter && rawClient
+      ? countAllCampaigns(user.id, {})
+      : Promise.resolve(0),
   ]);
   const hidden = isCapped ? Math.max(0, totalCount - campaigns.length) : 0;
+
+  // Plain-serialisable rows the client component can render + mutate.
+  const initialRows = campaigns.map((c) => ({
+    id: c.id,
+    name: c.name,
+    status: c.status,
+    createdAt: c.createdAt.toISOString(),
+    sentCount: c.sentCount,
+    failedCount: c.failedCount,
+    totalCount: c.totalCount,
+    client: c.client
+      ? { id: c.client.id, name: c.client.name, color: c.client.color }
+      : null,
+  }));
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -90,41 +109,14 @@ export default async function CampaignsPage({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {campaigns.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-8 text-center">
-              Campaigns will appear here once you start one.
-            </p>
-          ) : (
-            <>
-              <ul className="divide-y">
-                {campaigns.map((c) => (
-                  <CampaignListRow
-                    key={c.id}
-                    id={c.id}
-                    name={c.name}
-                    status={c.status}
-                    createdAt={c.createdAt}
-                    sentCount={c.sentCount}
-                    failedCount={c.failedCount}
-                    totalCount={c.totalCount}
-                    client={c.client}
-                  />
-                ))}
-              </ul>
-              {hidden > 0 && (
-                <div className="mt-4 pt-4 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm">
-                  <p className="text-muted-foreground">
-                    Showing your <strong>{campaigns.length}</strong> most recent
-                    campaigns. <strong>{hidden}</strong> more in your history are
-                    hidden on the {getPlanName(user.plan)} plan.
-                  </p>
-                  <Link href="/billing">
-                    <Button size="sm">Upgrade to view all →</Button>
-                  </Link>
-                </div>
-              )}
-            </>
-          )}
+          <CampaignsListClient
+            initialRows={initialRows}
+            canUseClients={canFilter}
+            activeClientFilter={rawClient}
+            unfilteredTotal={unfilteredTotal}
+            hidden={hidden}
+            planName={getPlanName(user.plan)}
+          />
         </CardContent>
       </Card>
     </div>
