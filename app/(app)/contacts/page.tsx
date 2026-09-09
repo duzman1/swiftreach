@@ -5,7 +5,7 @@
 // rename. Imports flow from the campaign wizard, not this page (the
 // "Add Contact" button creates one row at a time).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -15,6 +15,7 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   X,
   Loader2,
   ShieldOff,
@@ -22,6 +23,7 @@ import {
   FolderPlus,
   Send,
   Pencil,
+  UserSquare2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +55,13 @@ interface Group {
 
 type Tab = "contacts" | "groups";
 
+interface ClientLite {
+  id: string;
+  name: string;
+  color: string | null;
+  archived: boolean;
+}
+
 export default function ContactsPage() {
   const router = useRouter();
   const search = useSearchParams();
@@ -76,6 +85,20 @@ export default function ContactsPage() {
   const [editing, setEditing] = useState<Contact | null>(null);
   const [groupModal, setGroupModal] = useState<{ mode: "create" | "edit"; group?: Group } | null>(null);
   const [upgradeRequired, setUpgradeRequired] = useState(false);
+
+  // Per-client label wiring. `clients === null` = not yet loaded /
+  // below Pro (feature-gated 403). A non-null array means the user
+  // has perClientReporting; the array itself may still be empty
+  // (Pro user hasn't created any). Empty vs null matters for the UI:
+  // Pro user with no clients still gets the bulk-bar dropdown
+  // (offering only "Unassign"), non-Pro sees nothing at all.
+  const [clients, setClients] = useState<ClientLite[] | null>(null);
+  const canUseClients = clients !== null;
+  const activeClients = (clients ?? []).filter((c) => !c.archived);
+  // Bulk assign flow — pinned client id (or "unassigned") + confirm gate.
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+  // Select-all-matching flow.
+  const [selectingAll, setSelectingAll] = useState(false);
 
   async function loadGroups() {
     try {
@@ -120,6 +143,17 @@ export default function ContactsPage() {
 
   useEffect(() => {
     loadGroups();
+    // Fetch clients once on mount. A 403 here means the account
+    // doesn't have perClientReporting — we quietly leave clients as
+    // null and every downstream client-shaped control hides itself.
+    (async () => {
+      try {
+        const r = await fetch("/api/clients");
+        if (r.status === 403) return; // below Pro; no error toast
+        const j = await r.json();
+        if (j.ok) setClients(j.clients);
+      } catch { /* silent — feature just stays hidden */ }
+    })();
   }, []);
 
   useEffect(() => {
@@ -168,6 +202,92 @@ export default function ContactsPage() {
       loadGroups();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  /**
+   * Bulk-assign the current selection to a client (or clear the
+   * label if targetClientId === null). Reassigns even contacts that
+   * already have a different label — the spec is explicit on this.
+   * Confirmation states the count + the target so a fat-finger
+   * doesn't silently relabel a hundred contacts.
+   */
+  async function bulkAssign(targetClientId: string | null) {
+    if (selected.size === 0) return;
+    const target = targetClientId
+      ? activeClients.find((c) => c.id === targetClientId)
+      : null;
+    const targetLabel = targetClientId
+      ? `to ${target?.name ?? "this client"}`
+      : "as unassigned";
+    if (!confirm(
+      `${targetClientId ? "Assign" : "Unassign"} ${selected.size} contact${selected.size === 1 ? "" : "s"} ${targetLabel}? ` +
+      `Contacts already labelled with another client will be reassigned.`
+    )) return;
+    setBulkAssigning(true);
+    try {
+      const r = await fetch("/api/contacts/bulk-assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contactIds: Array.from(selected),
+          clientId: targetClientId,
+        }),
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        toast.error(j.error ?? "Assignment failed");
+        return;
+      }
+      toast.success(
+        targetClientId
+          ? `Assigned ${j.updated} contact${j.updated === 1 ? "" : "s"} to ${target?.name ?? "client"}`
+          : `Unassigned ${j.updated} contact${j.updated === 1 ? "" : "s"}`
+      );
+      setSelected(new Set());
+      loadContacts();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setBulkAssigning(false);
+    }
+  }
+
+  /**
+   * "Select all N matching current filter" — a real select-all, not
+   * just the loaded page. Fetches ids via the idsOnly=1 mode of the
+   * contacts list route. If total exceeds the server's cap (500),
+   * we still populate the selection with the returned first N and
+   * surface the cap in a toast so the user isn't misled about which
+   * contacts a subsequent bulk action will hit.
+   */
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    try {
+      const sp = new URLSearchParams();
+      if (q) sp.set("q", q);
+      if (groupFilter) sp.set("groupId", groupFilter);
+      if (statusFilter) sp.set("status", statusFilter);
+      if (clientId) sp.set("clientId", clientId);
+      sp.set("idsOnly", "1");
+      const r = await fetch(`/api/contacts?${sp.toString()}`);
+      const j = await r.json();
+      if (!j.ok) {
+        toast.error(j.error ?? "Failed to select all");
+        return;
+      }
+      setSelected(new Set(j.ids as string[]));
+      if (j.capped) {
+        toast(
+          `Selected first ${j.ids.length} of ${j.total}. Bulk actions are capped at ${j.cap} per call — repeat on the next batch after this one clears.`
+        );
+      } else {
+        toast.success(`Selected all ${j.ids.length} matching`);
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setSelectingAll(false);
     }
   }
 
@@ -333,12 +453,40 @@ export default function ContactsPage() {
           </Card>
 
           {selected.size > 0 && (
-            <div className="rounded-md border bg-zinc-50 px-4 py-2 flex items-center justify-between text-sm">
-              <span>{selected.size} selected</span>
-              <div className="flex items-center gap-2">
+            <div className="rounded-md border bg-zinc-50 px-4 py-2 flex items-center justify-between text-sm flex-wrap gap-y-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span>{selected.size} selected</span>
+                {/* When the user has more rows matching the filter
+                    than are on the loaded page, offer a true
+                    select-all — cheaper than paginating. Hidden when
+                    the selection already equals the full match set. */}
+                {total > (contacts?.length ?? 0) && selected.size < total && (
+                  <button
+                    type="button"
+                    onClick={selectAllMatching}
+                    disabled={selectingAll}
+                    className="text-whatsapp hover:underline text-xs font-medium disabled:opacity-50"
+                  >
+                    {selectingAll
+                      ? "Selecting…"
+                      : `Select all ${total.toLocaleString()} matching current filter`}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
                   Clear
                 </Button>
+                {/* Assign-to-client control — Pro only. Hidden when
+                    the account doesn't have perClientReporting (the
+                    /api/clients fetch 403'd on mount → clients=null). */}
+                {canUseClients && (
+                  <BulkAssignMenu
+                    clients={activeClients}
+                    disabled={bulkAssigning}
+                    onAssign={bulkAssign}
+                  />
+                )}
                 <Button size="sm" variant="outline" onClick={bulkDelete} className="text-red-600">
                   <Trash2 className="w-3.5 h-3.5" />
                   Delete
@@ -353,31 +501,41 @@ export default function ContactsPage() {
                 <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-3 py-3 w-8">
+                      {/* Checkbox toggles only the CURRENT PAGE
+                          (up to PAGE_SIZE=50). The bulk bar's
+                          "Select all N matching" link is the way to
+                          reach the full match set — this checkbox
+                          alone would silently mislead when a filter
+                          matches more than one page. */}
                       <input
                         type="checkbox"
-                        checked={contacts ? selected.size === contacts.length && contacts.length > 0 : false}
+                        title="Select all on this page"
+                        aria-label={`Select all ${contacts?.length ?? 0} on this page`}
+                        checked={contacts ? selected.size >= contacts.length && contacts.length > 0 : false}
                         onChange={toggleAllOnPage}
                       />
                     </th>
                     <th className="px-4 py-3 text-left">Phone</th>
                     <th className="px-4 py-3 text-left">Fields</th>
                     <th className="px-4 py-3 text-left">Groups</th>
+                    {canUseClients && <th className="px-4 py-3 text-left">Client</th>}
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {loading && !contacts && (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                    <tr><td colSpan={canUseClients ? 7 : 6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
                   )}
                   {contacts && contacts.length === 0 && !loading && (
-                    <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">No contacts yet — click &quot;Add Contact&quot; or import from a campaign.</td></tr>
+                    <tr><td colSpan={canUseClients ? 7 : 6} className="px-4 py-12 text-center text-muted-foreground">No contacts yet — click &quot;Add Contact&quot; or import from a campaign.</td></tr>
                   )}
                   {contacts?.map((c) => (
                     <ContactRow
                       key={c.id}
                       c={c}
                       groups={groups ?? []}
+                      showClientColumn={canUseClients}
                       selected={selected.has(c.id)}
                       onToggle={() => toggleOne(c.id)}
                       onEdit={() => setEditing(c)}
@@ -432,6 +590,7 @@ export default function ContactsPage() {
         <ContactModal
           mode="create"
           groups={groups ?? []}
+          clients={canUseClients ? activeClients : null}
           onClose={() => setAddOpen(false)}
           onSaved={() => {
             setAddOpen(false);
@@ -446,6 +605,7 @@ export default function ContactsPage() {
           mode="edit"
           contact={editing}
           groups={groups ?? []}
+          clients={canUseClients ? activeClients : null}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -473,6 +633,7 @@ export default function ContactsPage() {
 function ContactRow({
   c,
   groups,
+  showClientColumn,
   selected,
   onToggle,
   onEdit,
@@ -481,6 +642,7 @@ function ContactRow({
 }: {
   c: Contact;
   groups: Group[];
+  showClientColumn: boolean;
   selected: boolean;
   onToggle: () => void;
   onEdit: () => void;
@@ -518,7 +680,6 @@ function ContactRow({
       </td>
       <td className="px-4 py-2">
         <div className="flex flex-wrap gap-1 items-center">
-          {c.client && <ClientChip client={c.client} />}
           {groupIds.map((gid) => {
             const g = groups.find((x) => x.id === gid);
             if (!g) return null;
@@ -532,11 +693,20 @@ function ContactRow({
               </span>
             );
           })}
-          {!c.client && groupIds.length === 0 && (
+          {groupIds.length === 0 && (
             <span className="text-xs text-muted-foreground">—</span>
           )}
         </div>
       </td>
+      {showClientColumn && (
+        <td className="px-4 py-2">
+          {c.client ? (
+            <ClientChip client={c.client} />
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          )}
+        </td>
+      )}
       <td className="px-4 py-2">
         {c.optedOut ? (
           <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700">
@@ -652,12 +822,16 @@ function ContactModal({
   mode,
   contact,
   groups,
+  clients,
   onClose,
   onSaved,
 }: {
   mode: "create" | "edit";
   contact?: Contact;
   groups: Group[];
+  /** Non-archived clients for the label selector. `null` = feature
+   *  not available on this account (below Pro) → selector is hidden. */
+  clients: ClientLite[] | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -675,6 +849,9 @@ function ContactModal({
     Object.entries(initial).map(([k, v]) => ({ key: k, value: String(v) }))
   );
   const [pickedGroups, setPickedGroups] = useState<string[]>(initialGroups);
+  // "" here = Unassigned. Only used when the account has clients
+  // enabled; when clients is null this state is inert.
+  const [pickedClientId, setPickedClientId] = useState<string>(contact?.clientId ?? "");
   const [saving, setSaving] = useState(false);
 
   function addField() {
@@ -696,9 +873,15 @@ function ContactModal({
       }
       const url = mode === "create" ? "/api/contacts" : `/api/contacts/${contact!.id}`;
       const method = mode === "create" ? "POST" : "PUT";
+      // Only send clientId when the account has clients enabled AND
+      // the value changed from the initial. "" → null (Unassigned).
+      const clientFieldPatch =
+        clients !== null && pickedClientId !== (contact?.clientId ?? "")
+          ? { clientId: pickedClientId || null }
+          : {};
       const body = mode === "create"
-        ? { phoneNumber: phone, data, groupIds: pickedGroups }
-        : { data, groupIds: pickedGroups };
+        ? { phoneNumber: phone, data, groupIds: pickedGroups, ...clientFieldPatch }
+        : { data, groupIds: pickedGroups, ...clientFieldPatch };
       const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error ?? "Failed");
@@ -726,6 +909,26 @@ function ContactModal({
             disabled={mode === "edit"}
           />
         </div>
+
+        {/* Client selector — shown only when the account has
+            perClientReporting. "" = Unassigned; server treats
+            missing/null identically. */}
+        {clients !== null && (
+          <div>
+            <Label htmlFor="c-client" className="block mb-1.5">Client</Label>
+            <select
+              id="c-client"
+              value={pickedClientId}
+              onChange={(e) => setPickedClientId(e.target.value)}
+              className="w-full h-9 px-3 rounded-md border border-zinc-300 bg-white text-sm"
+            >
+              <option value="">— Unassigned —</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -877,6 +1080,101 @@ function GroupModal({
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Bulk-assign dropdown for the contacts-page bulk action bar.
+ * Renders a button that opens a small popover listing every
+ * non-archived client + an Unassign entry. Selecting one calls
+ * onAssign(id | null) — parent confirms and fires the API.
+ *
+ * When the account has zero non-archived clients, the button still
+ * appears and offers only Unassign, so a Pro user without labels
+ * yet can still clear a stale one on a selection.
+ */
+function BulkAssignMenu({
+  clients,
+  disabled,
+  onAssign,
+}: {
+  clients: ClientLite[];
+  disabled: boolean;
+  onAssign: (clientId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onClickOutside);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClickOutside);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        className="gap-1.5"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <UserSquare2 className="w-3.5 h-3.5" />
+        Assign to client
+        <ChevronDown className="w-3 h-3" />
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-1 w-64 max-h-72 overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg z-20 py-1"
+        >
+          {clients.length === 0 && (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              No clients created yet. Add one in Settings &rarr; Clients.
+            </div>
+          )}
+          {clients.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              role="menuitem"
+              onClick={() => { setOpen(false); onAssign(c.id); }}
+              className="w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-50 flex items-center gap-2"
+            >
+              <span
+                aria-hidden
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ background: c.color ?? "#71717a" }}
+              />
+              <span className="truncate">{c.name}</span>
+            </button>
+          ))}
+          <div className="my-1 border-t border-zinc-100" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setOpen(false); onAssign(null); }}
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-50 text-zinc-600"
+          >
+            Unassign (clear label)
+          </button>
+        </div>
+      )}
     </div>
   );
 }
