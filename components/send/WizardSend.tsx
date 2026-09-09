@@ -495,7 +495,12 @@ export function WizardSend() {
       setCreating(true);
       setCreateError(null);
       try {
-        const body = {
+        // Audience path is late-binding: schedule stores audienceId and
+        // resolves at fire time (matches the whole point of "audiences
+        // stay current"). Snapshot path is the classic freeze at
+        // schedule-time.
+        const isAudience = Boolean(parsed?.audienceId);
+        const body: Record<string, unknown> = {
           name: campaignName.trim(),
           mode,
           rawMessage: mode === "freeform" ? template : undefined,
@@ -504,20 +509,24 @@ export function WizardSend() {
           variableMap: mode === "template" ? variableMap : undefined,
           staticVars: staticVarsObj,
           formatRules,
-          phoneColumn,
           delayMs,
-          // Filters were already applied client-side into filteredRows;
-          // strip skipped rows so the schedule fires the exact set the
-          // user reviewed.
-          contacts: filteredRows.filter(
-            (_, i) => !skippedIndices.includes(i)
-          ),
           scheduledFor: iso,
           timezone: sendTiming.timezone,
           recurring: sendTiming.recurring,
           recurrence: sendTiming.recurring ? sendTiming.recurrence : null,
           recurrenceDay: sendTiming.recurring ? sendTiming.recurrenceDay : null,
         };
+        if (isAudience) {
+          body.audienceId = parsed!.audienceId;
+        } else {
+          body.phoneColumn = phoneColumn;
+          // Filters were already applied client-side into filteredRows;
+          // strip skipped rows so the schedule fires the exact set the
+          // user reviewed.
+          body.contacts = filteredRows.filter(
+            (_, i) => !skippedIndices.includes(i)
+          );
+        }
         const res = await fetch("/api/scheduled", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -551,7 +560,12 @@ export function WizardSend() {
     setCreating(true);
     setCreateError(null);
     try {
-      const body = {
+      // Audience path: don't send rows[] — the server re-resolves the
+      // audience live so the sent set matches contacts as they are NOW,
+      // not what the wizard previewed a few minutes ago. filters and
+      // skippedIndices don't apply either (audience rules ARE the filter).
+      const isAudience = Boolean(parsed?.audienceId);
+      const body: Record<string, unknown> = {
         name: campaignName.trim(),
         mode,
         rawMessage: mode === "freeform" ? template : undefined,
@@ -560,13 +574,17 @@ export function WizardSend() {
         variableMap: mode === "template" ? variableMap : undefined,
         staticVars: staticVarsObj,
         formatRules,
-        phoneColumn,
         defaultCountryCode,
         delayMs,
-        filters,
-        rows: filteredRows,
-        skippedIndices,
       };
+      if (isAudience) {
+        body.audienceId = parsed!.audienceId;
+      } else {
+        body.phoneColumn = phoneColumn;
+        body.filters = filters;
+        body.rows = filteredRows;
+        body.skippedIndices = skippedIndices;
+      }
       const res = await fetch("/api/campaigns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

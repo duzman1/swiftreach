@@ -7,6 +7,7 @@ import { type VariableMapping } from "@/lib/whatsapp";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { hasFeature } from "@/lib/plans";
+import { resolveAudienceToRows, AudienceResolveError } from "@/lib/resolveAudienceContacts";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,14 @@ interface CreateCampaignBody {
   // detection happens client-side; server just accepts what it's
   // sent). Pro-only; ignored on non-Pro plans without erroring.
   clientId?: string | null;
+  // Optional Saved Audience. When set, the server resolves the
+  // audience server-side into row data (ignoring any client-sent
+  // `rows`), refuses to create the campaign if the audience is
+  // empty, and records audienceId + audienceResolvedCount on the
+  // Campaign for later attribution. phoneColumn is forced to
+  // "phoneNumber" in that path — audiences resolve to SavedContact
+  // rows, which always carry that field.
+  audienceId?: string | null;
 }
 
 function badRequest(message: string) {
@@ -110,10 +119,6 @@ export async function POST(req: NextRequest) {
   if (!body.name?.trim()) return badRequest("Missing campaign name");
   if (body.mode !== "freeform" && body.mode !== "template")
     return badRequest("Invalid mode");
-  if (!body.phoneColumn) return badRequest("Missing phoneColumn");
-  if (!Array.isArray(body.rows) || body.rows.length === 0)
-    return badRequest("No rows provided");
-
   if (body.mode === "freeform" && !body.rawMessage?.trim()) {
     return badRequest("Mode 'freeform' requires rawMessage");
   }
@@ -121,19 +126,68 @@ export async function POST(req: NextRequest) {
     return badRequest("Mode 'template' requires templateName and templateLanguage");
   }
 
+  // Two source shapes are accepted: an audience id (server resolves
+  // to live SavedContact rows now) OR a client-supplied rows[] (the
+  // classic CSV path). audienceId wins if both are sent.
+  let sourceRows: Array<Record<string, string>>;
+  let phoneColumn: string;
+  let audienceId: string | null = null;
+  let audienceResolvedCount: number | null = null;
+
+  if (body.audienceId) {
+    // Gate: a user whose plan doesn't include savedAudiences can't
+    // send USING an audience — even if they had it saved from a prior
+    // plan. Enforcing here (not just at create time) means downgrades
+    // stop being a way around the plan.
+    const owner = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { plan: true },
+    });
+    if (!hasFeature(owner?.plan, "savedAudiences")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Saved audiences require the Growth plan.",
+          upgradeRequired: true,
+          requiredPlan: "growth",
+        },
+        { status: 403 }
+      );
+    }
+    try {
+      const resolved = await resolveAudienceToRows(prisma, userId, body.audienceId);
+      sourceRows = resolved.rows;
+      phoneColumn = "phoneNumber";
+      audienceId = resolved.audienceId;
+      audienceResolvedCount = resolved.resolvedCount;
+    } catch (e) {
+      if (e instanceof AudienceResolveError) return badRequest(e.message);
+      return handleApiError(e, "POST /api/campaigns (audience resolve)");
+    }
+  } else {
+    if (!body.phoneColumn) return badRequest("Missing phoneColumn");
+    if (!Array.isArray(body.rows) || body.rows.length === 0)
+      return badRequest("No rows provided");
+    sourceRows = body.rows;
+    phoneColumn = body.phoneColumn;
+  }
+
   const staticVars = body.staticVars ?? {};
   const formatRules = body.formatRules ?? {};
   const defaultCountryCode = body.defaultCountryCode || "1";
   const delayMs = Math.max(500, Math.min(60000, body.delayMs ?? 2000));
-  const filters = body.filters ?? [];
+  // Audience-sourced rows already satisfy the audience's rules — the
+  // wizard's ad-hoc filters are meant for CSV rows, so we ignore them
+  // on the audience path.
+  const filters = body.audienceId ? [] : (body.filters ?? []);
 
   // Apply filters server-side (don't trust client to have applied them).
-  const filteredRows = applyFilters(body.rows, filters);
-  const skipped = new Set(body.skippedIndices ?? []);
+  const filteredRows = applyFilters(sourceRows, filters);
+  const skipped = new Set(body.audienceId ? [] : (body.skippedIndices ?? []));
 
   // Build contact rows
   const contactsData = filteredRows.map((row, i) => {
-    const phoneRaw = row[body.phoneColumn] ?? "";
+    const phoneRaw = row[phoneColumn] ?? "";
     const phone = normalizePhone(phoneRaw, defaultCountryCode);
     const phoneValid = isValidPhone(phone);
     const isSkipped = skipped.has(i);
@@ -219,15 +273,25 @@ export async function POST(req: NextRequest) {
         staticVars: JSON.stringify(staticVars),
         variableMap: JSON.stringify(body.variableMap ?? []),
         formatRules: JSON.stringify(formatRules),
-        phoneColumn: body.phoneColumn,
+        phoneColumn,
         delayMs,
         status: "draft",
         totalCount,
         skippedCount,
         clientId,
+        audienceId,
+        audienceResolvedCount,
         contacts: { create: contactsData },
       },
-      select: { id: true, name: true, totalCount: true, skippedCount: true, clientId: true },
+      select: {
+        id: true,
+        name: true,
+        totalCount: true,
+        skippedCount: true,
+        clientId: true,
+        audienceId: true,
+        audienceResolvedCount: true,
+      },
     });
     return NextResponse.json({ ok: true, campaign });
   } catch (err) {

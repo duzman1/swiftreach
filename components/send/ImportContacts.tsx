@@ -2,10 +2,11 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { BookOpen, Upload } from "lucide-react";
+import { BookOpen, Upload, Users } from "lucide-react";
 import { FileUpload } from "./FileUpload";
 import { GoogleDrivePicker } from "./GoogleDrivePicker";
 import { ContactBookPicker } from "./ContactBookPicker";
+import { AudiencePicker } from "./AudiencePicker";
 import type { ParsedFile } from "@/lib/parseFile";
 
 interface Props {
@@ -36,6 +37,7 @@ export function ImportContacts({
   const searchParams = useSearchParams();
   const groupFromUrl = searchParams?.get("group") ?? null;
   const [contactBookOpen, setContactBookOpen] = React.useState(false);
+  const [audiencePickerOpen, setAudiencePickerOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (groupFromUrl && !parsed && !contactBookOpen) {
@@ -62,7 +64,20 @@ export function ImportContacts({
     );
   }
 
-  const cols = googleEnabled ? "md:grid-cols-3" : "md:grid-cols-2";
+  if (audiencePickerOpen) {
+    return (
+      <AudiencePicker
+        onParsed={(file) => {
+          setAudiencePickerOpen(false);
+          onParsed(file);
+        }}
+        onCancel={() => setAudiencePickerOpen(false)}
+      />
+    );
+  }
+
+  // Four import options when Google is enabled (2×2), three when not.
+  const cols = googleEnabled ? "md:grid-cols-4" : "md:grid-cols-3";
 
   return (
     <div className="space-y-3">
@@ -81,6 +96,17 @@ export function ImportContacts({
           <div className="font-medium text-sm">Contact Book</div>
           <div className="text-xs text-muted-foreground">
             Pick from your saved contacts or a group
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setAudiencePickerOpen(true)}
+          className="rounded-lg border border-dashed border-zinc-300 bg-background hover:border-whatsapp hover:bg-emerald-50/50 transition-colors p-4 flex flex-col items-center justify-center text-center gap-2 min-h-[140px]"
+        >
+          <Users className="w-6 h-6 text-whatsapp" />
+          <div className="font-medium text-sm">Saved Audience</div>
+          <div className="text-xs text-muted-foreground">
+            Rule-based list — stays current as contacts change
           </div>
         </button>
       </div>

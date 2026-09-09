@@ -156,12 +156,12 @@ export const PLANS: Record<PlanId, Plan> = {
       scheduledCampaigns: true,
       fullAnalytics: true,
       analyticsExport: false,
-      // savedAudiences stays FALSE until the rule-builder ships.
-      // The pricing table had it checked from launch but no data
-      // model, API, or UI existed — audit confirmed zero saved
-      // audiences across every account. Flipping this back to true
-      // is the last step of the build-out.
-      savedAudiences: false,
+      // Saved Audiences shipped: rule builder on Contacts → Audiences
+      // tab; used in the campaign wizard and scheduled sends; late-
+      // binding for scheduled runs (audience rules re-resolve at fire
+      // time). Empty rule sets are refused at API / wizard / send.
+      // Pricing table promise is now truthful.
+      savedAudiences: true,
       whiteLabelReports: false,
       perClientReporting: false,
       customOnboarding: false,
@@ -191,10 +191,9 @@ export const PLANS: Record<PlanId, Plan> = {
       scheduledCampaigns: true,
       fullAnalytics: true,
       analyticsExport: true,
-      // savedAudiences stays FALSE on Pro too — see the Growth
-      // comment. Both flip true in the final commit of the
-      // saved-audiences build-out.
-      savedAudiences: false,
+      // Saved Audiences shipped (see Growth comment). Pro inherits
+      // the same feature — no separate Pro-only slice for now.
+      savedAudiences: true,
       whiteLabelReports: true,
       // Per-client tagging + analytics filter + per-client PDF report
       // shipped. Comparison-table row + Pro card bullet now render ✓.

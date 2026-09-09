@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UpgradePrompt } from "@/components/shared/UpgradePrompt";
 import { ClientFilter, ClientChip } from "@/components/clients/ClientFilter";
+import { AudiencesTab } from "@/components/audiences/AudiencesTab";
 
 interface Contact {
   id: string;
@@ -53,7 +54,7 @@ interface Group {
   contactCount: number;
 }
 
-type Tab = "contacts" | "groups";
+type Tab = "contacts" | "groups" | "audiences";
 
 interface ClientLite {
   id: string;
@@ -399,6 +400,16 @@ export default function ContactsPage() {
         >
           Groups {groups && groups.length > 0 && `(${groups.length})`}
         </button>
+        <button
+          onClick={() => setTab("audiences")}
+          className={`pb-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === "audiences"
+              ? "border-whatsapp text-whatsapp"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Audiences
+        </button>
       </div>
 
       {tab === "contacts" ? (
@@ -574,7 +585,7 @@ export default function ContactsPage() {
             )}
           </Card>
         </>
-      ) : (
+      ) : tab === "groups" ? (
         <GroupsTab
           groups={groups}
           onChanged={() => {
@@ -584,6 +595,8 @@ export default function ContactsPage() {
           onEdit={(g) => setGroupModal({ mode: "edit", group: g })}
           onCreate={() => setGroupModal({ mode: "create" })}
         />
+      ) : (
+        <AudiencesTab />
       )}
 
       {addOpen && (
