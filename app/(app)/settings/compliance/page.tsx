@@ -38,6 +38,29 @@ interface DncRow {
   sourceOptOutId: string | null;
 }
 
+interface MetaStatus {
+  connected: boolean;
+  message?: string;
+  fetchedAt?: string;
+  templates?: {
+    total: number;
+    counts: Record<string, number> | null;
+    blocking: Array<{ name: string; status: string; reason: string | null }>;
+    error: string | null;
+  };
+  phones?: {
+    rows: Array<{
+      id: string;
+      displayPhoneNumber: string;
+      verifiedName: string;
+      qualityRating: string;
+      messagingLimitTier: string;
+      nameStatus: string;
+    }>;
+    error: string | null;
+  };
+}
+
 export default function CompliancePage() {
   const [summary, setSummary] = React.useState<Summary | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -45,6 +68,8 @@ export default function CompliancePage() {
   const [dncLoading, setDncLoading] = React.useState(false);
   const [dncCursor, setDncCursor] = React.useState<string | null>(null);
   const [clearingPhone, setClearingPhone] = React.useState<string | null>(null);
+  const [meta, setMeta] = React.useState<MetaStatus | null>(null);
+  const [metaLoading, setMetaLoading] = React.useState(true);
 
   React.useEffect(() => {
     (async () => {
@@ -57,6 +82,20 @@ export default function CompliancePage() {
         toast.error(e instanceof Error ? e.message : "Failed to load");
       } finally {
         setLoading(false);
+      }
+    })();
+    // Meta status fetches in parallel — it's the slow one (external
+    // API call) so we don't block the rest of the page on it.
+    (async () => {
+      try {
+        const r = await fetch("/api/compliance/meta-status");
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error ?? "Failed");
+        setMeta(j);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to load Meta status");
+      } finally {
+        setMetaLoading(false);
       }
     })();
   }, []);
@@ -293,21 +332,184 @@ export default function CompliancePage() {
             </CardContent>
           </Card>
 
-          {/* Template + quality — placeholder until Part 3 lands */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Meta template + quality status</CardTitle>
-              <CardDescription className="text-xs">
-                Coming in the next commit — pulls template approval state and
-                phone-number quality rating from Meta so degraded templates
-                get flagged before campaign build, not at send time.
-              </CardDescription>
-            </CardHeader>
-          </Card>
+          <MetaStatusCard status={meta} loading={metaLoading} />
         </>
       )}
     </div>
   );
+}
+
+/** Meta template + quality tile. Real data — pulls both signals via
+ *  /api/compliance/meta-status. Renders three sub-sections:
+ *   1. Phone-number quality + tier per number on the WABA
+ *   2. Template approval breakdown + list of blocked templates
+ *   3. A "not connected" state when the user hasn't linked WhatsApp */
+function MetaStatusCard({
+  status,
+  loading,
+}: {
+  status: MetaStatus | null;
+  loading: boolean;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Meta template + quality status</CardTitle>
+        <CardDescription>
+          Pulled live from the WhatsApp Cloud API. Cached ~90s.
+          {status?.fetchedAt && (
+            <span className="ml-1 text-xs text-muted-foreground">
+              (last check {new Date(status.fetchedAt).toLocaleTimeString()})
+            </span>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading ? (
+          <div className="text-sm text-muted-foreground flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Fetching from Meta…
+          </div>
+        ) : !status?.connected ? (
+          <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-muted-foreground">
+            {status?.message ?? "Connect WhatsApp to see template and quality status."}
+            {" "}
+            <Link href="/settings" className="underline">
+              Open Settings →
+            </Link>
+          </div>
+        ) : (
+          <>
+            {/* Phone numbers block */}
+            <section>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+                Phone numbers
+              </div>
+              {status.phones?.error ? (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  {status.phones.error}
+                </div>
+              ) : status.phones?.rows.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No numbers found on this WABA.</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-zinc-50">
+                    <tr>
+                      <th className="text-left px-3 py-1.5 font-medium">Number</th>
+                      <th className="text-left px-3 py-1.5 font-medium">Quality</th>
+                      <th className="text-left px-3 py-1.5 font-medium">Tier</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100">
+                    {(status.phones?.rows ?? []).map((p) => (
+                      <tr key={p.id}>
+                        <td className="px-3 py-1.5">
+                          <div className="font-mono">{p.displayPhoneNumber}</div>
+                          <div className="text-[10px] text-muted-foreground">{p.verifiedName}</div>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <QualityPill rating={p.qualityRating} />
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">
+                          {formatTier(p.messagingLimitTier)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+
+            {/* Templates block */}
+            <section>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+                Template approval
+              </div>
+              {status.templates?.error ? (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  {status.templates.error}
+                </div>
+              ) : status.templates && status.templates.total === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  No templates in your WABA yet.
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {Object.entries(status.templates?.counts ?? {}).map(([s, n]) => (
+                      <StatusChip key={s} status={s} count={n} />
+                    ))}
+                  </div>
+                  {(status.templates?.blocking.length ?? 0) > 0 && (
+                    <div className="rounded-md border border-red-200 bg-red-50 p-3 space-y-2">
+                      <div className="text-xs font-medium text-red-800 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        {status.templates?.blocking.length} template
+                        {status.templates?.blocking.length === 1 ? "" : "s"} can&apos;t
+                        be used right now
+                      </div>
+                      <ul className="text-xs space-y-1">
+                        {status.templates?.blocking.map((t) => (
+                          <li key={t.name} className="flex items-baseline gap-2">
+                            <code className="font-mono text-red-900">{t.name}</code>
+                            <span className="text-red-700">— {t.status}</span>
+                            {t.reason && (
+                              <span className="text-red-600 truncate" title={t.reason}>
+                                ({t.reason})
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function QualityPill({ rating }: { rating: string }) {
+  const cfg: Record<string, { bg: string; text: string }> = {
+    GREEN: { bg: "bg-emerald-100", text: "text-emerald-800" },
+    YELLOW: { bg: "bg-amber-100", text: "text-amber-800" },
+    RED: { bg: "bg-red-100", text: "text-red-800" },
+    UNKNOWN: { bg: "bg-zinc-100", text: "text-zinc-700" },
+  };
+  const c = cfg[rating] ?? cfg.UNKNOWN;
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${c.bg} ${c.text}`}>
+      {rating}
+    </span>
+  );
+}
+
+function StatusChip({ status, count }: { status: string; count: number }) {
+  const bg =
+    status === "APPROVED"
+      ? "bg-emerald-100 text-emerald-800"
+      : status === "REJECTED" || status === "DISABLED" || status === "PENDING_DELETION"
+        ? "bg-red-100 text-red-800"
+        : status === "PENDING" || status === "PAUSED" || status === "LIMITED" || status === "IN_APPEAL"
+          ? "bg-amber-100 text-amber-800"
+          : "bg-zinc-100 text-zinc-700";
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${bg}`}>
+      {status}
+      <span className="opacity-70">·</span>
+      {count}
+    </span>
+  );
+}
+
+function formatTier(t: string): string {
+  // Meta returns things like "TIER_1K" — humanise for display.
+  if (t === "TIER_UNKNOWN") return "—";
+  const m = t.match(/^TIER_(.+)$/);
+  return m ? m[1].replace(/_/g, " ").toLowerCase() : t;
 }
 
 function Metric({

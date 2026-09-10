@@ -1,13 +1,96 @@
 "use client";
 
 import * as React from "react";
-import { ExternalLink, Plus, X } from "lucide-react";
+import { ExternalLink, Plus, X, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { ParsedFile } from "@/lib/parseFile";
 import type { VariableMapping } from "@/lib/whatsapp";
+
+/** Fetch Meta template statuses once per mount. Uses the same
+ *  cached endpoint the compliance dashboard hits, so a user
+ *  bouncing between the two pages doesn't re-hammer Meta. Fails
+ *  silent — an unavailable Meta status just means no pill, not a
+ *  broken wizard. */
+interface TemplateStatusEntry {
+  name: string;
+  status: string;
+}
+function useTemplateStatuses(): TemplateStatusEntry[] | null {
+  const [entries, setEntries] = React.useState<TemplateStatusEntry[] | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/compliance/meta-status");
+        const j = await r.json();
+        if (cancelled || !j.ok || !j.connected || !j.templates?.counts) return;
+        // meta-status endpoint returns counts + blocking; for the
+        // per-template pill we need the full list — fetch it from
+        // the whatsapp/templates route which already carries name+status.
+        const r2 = await fetch("/api/whatsapp/templates");
+        const j2 = await r2.json();
+        if (cancelled || !j2.ok) return;
+        setEntries(
+          (j2.templates ?? []).map((t: { name: string; status: string }) => ({
+            name: t.name,
+            status: t.status,
+          }))
+        );
+      } catch {
+        /* silent — no pill is fine */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return entries;
+}
+
+function pillFor(status: string): { color: string; icon: React.ReactNode; label: string; note?: string } {
+  switch (status) {
+    case "APPROVED":
+      return {
+        color: "bg-emerald-100 text-emerald-800 border-emerald-200",
+        icon: <CheckCircle2 className="w-3 h-3" />,
+        label: "APPROVED",
+      };
+    case "REJECTED":
+    case "DISABLED":
+    case "PENDING_DELETION":
+      return {
+        color: "bg-red-100 text-red-800 border-red-200",
+        icon: <XCircle className="w-3 h-3" />,
+        label: status,
+        note: "Meta will not deliver messages on this template.",
+      };
+    case "PENDING":
+      return {
+        color: "bg-amber-100 text-amber-800 border-amber-200",
+        icon: <AlertTriangle className="w-3 h-3" />,
+        label: "PENDING",
+        note: "Awaiting Meta approval. Wait before building a campaign.",
+      };
+    case "PAUSED":
+    case "LIMITED":
+    case "IN_APPEAL":
+      return {
+        color: "bg-amber-100 text-amber-800 border-amber-200",
+        icon: <AlertTriangle className="w-3 h-3" />,
+        label: status,
+        note: "Meta has restricted delivery — sends may throttle or fail.",
+      };
+    default:
+      return {
+        color: "bg-zinc-100 text-zinc-700 border-zinc-200",
+        icon: null,
+        label: status,
+      };
+  }
+}
 
 interface Props {
   parsed: ParsedFile;
@@ -35,6 +118,18 @@ export function TemplateMapper({
   testSending,
 }: Props) {
   const insertableHeaders = parsed.headers.filter((h) => h !== phoneColumn);
+  const statuses = useTemplateStatuses();
+  // Case-insensitive lookup on template name — Meta names are
+  // case-sensitive but users often mistype casing; the status pill
+  // matches exact first, then a case-insensitive fallback to catch
+  // "MyTemplate" vs "mytemplate" typos so the pill still appears.
+  const matched = React.useMemo(() => {
+    if (!statuses || !templateName.trim()) return null;
+    const exact = statuses.find((s) => s.name === templateName.trim());
+    if (exact) return exact;
+    return statuses.find((s) => s.name.toLowerCase() === templateName.trim().toLowerCase()) ?? null;
+  }, [statuses, templateName]);
+  const pill = matched ? pillFor(matched.status) : null;
 
   function addRow() {
     const next = [...variableMap];
@@ -71,6 +166,19 @@ export function TemplateMapper({
             onChange={(e) => onTemplateName(e.target.value)}
             placeholder="exact_template_name_from_meta"
           />
+          {/* Meta approval pill. Shows only when we can match the
+              typed name to a template on the user's WABA. Silent
+              when the user hasn't connected Meta or hasn't typed
+              a name yet — no false alarms. */}
+          {pill && (
+            <div className={`mt-1.5 inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] font-medium ${pill.color}`}>
+              {pill.icon}
+              <span>{pill.label}</span>
+              {pill.note && (
+                <span className="font-normal opacity-90 ml-1">— {pill.note}</span>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <Label htmlFor="template-lang" className="block mb-1.5">
