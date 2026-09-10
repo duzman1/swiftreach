@@ -44,6 +44,14 @@ interface Contact {
   updatedAt: string;
   clientId?: string | null;
   client?: { id: string; name: string; color: string | null } | null;
+  // Consent provenance — populated by the compliance layer.
+  // consentStatus is always set (defaults to "unknown"); the rest may
+  // be null when we don't have the fact recorded.
+  consentStatus?: string;
+  consentSource?: string | null;
+  consentDate?: string | null;
+  consentRecordedAt?: string | null;
+  consentNote?: string | null;
 }
 
 interface Group {
@@ -721,13 +729,27 @@ function ContactRow({
         </td>
       )}
       <td className="px-4 py-2">
-        {c.optedOut ? (
-          <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700">
-            Opted Out
-          </span>
-        ) : (
-          <span className="text-xs text-emerald-700">Active</span>
-        )}
+        <div className="flex flex-col gap-1 items-start">
+          {c.optedOut ? (
+            <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700">
+              Opted Out
+            </span>
+          ) : (
+            <span className="text-xs text-emerald-700">Active</span>
+          )}
+          {/* Unverified-consent pill. Shows on any contact whose
+              consent basis wasn't captured — a truthful "we don't
+              know" indicator, not a block. Clicking Edit lets the
+              user promote the status. */}
+          {(c.consentStatus ?? "unknown") === "unknown" && (
+            <span
+              className="inline-block px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800"
+              title="Consent basis is unrecorded. Click Edit to set it."
+            >
+              Unverified consent
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-2 text-right">
         <div className="inline-flex items-center gap-1">
@@ -867,6 +889,24 @@ function ContactModal({
   const [pickedClientId, setPickedClientId] = useState<string>(contact?.clientId ?? "");
   const [saving, setSaving] = useState(false);
 
+  // ── Consent capture ────────────────────────────────────────────────
+  // consentStatus defaults to "explicit" on the create form — a user
+  // manually adding one contact almost always has a real basis for
+  // it (they wouldn't be doing it otherwise). If they don't fill in
+  // the source, the row still counts as "explicit" — the source is
+  // optional-but-prompted; leaving it blank doesn't invalidate the
+  // status the user chose, it just leaves the source unknown. For
+  // edit, we start from what's in the DB so existing "unknown" rows
+  // stay unknown unless the user explicitly promotes them.
+  const [consentStatus, setConsentStatus] = useState<string>(
+    contact?.consentStatus ?? (mode === "create" ? "explicit" : "unknown")
+  );
+  const [consentSource, setConsentSource] = useState<string>(contact?.consentSource ?? "");
+  const [consentDate, setConsentDate] = useState<string>(
+    contact?.consentDate ? contact.consentDate.slice(0, 10) : ""
+  );
+  const [consentNote, setConsentNote] = useState<string>(contact?.consentNote ?? "");
+
   function addField() {
     setFields((f) => [...f, { key: "", value: "" }]);
   }
@@ -892,9 +932,29 @@ function ContactModal({
         clients !== null && pickedClientId !== (contact?.clientId ?? "")
           ? { clientId: pickedClientId || null }
           : {};
+      // Consent payload. Send only what changed on edit — sending
+      // status:"explicit" on an untouched edit would silently promote
+      // an unknown row, which is exactly what rule 1 forbids. So
+      // include consent fields on create always, but on edit only
+      // when the user actually touched them (checked by comparing
+      // against the original values from the loaded contact).
+      const consentChanged =
+        mode === "create" ||
+        consentStatus !== (contact?.consentStatus ?? "unknown") ||
+        consentSource !== (contact?.consentSource ?? "") ||
+        consentDate !== (contact?.consentDate ? contact.consentDate.slice(0, 10) : "") ||
+        consentNote !== (contact?.consentNote ?? "");
+      const consentPatch = consentChanged
+        ? {
+            consentStatus,
+            consentSource: consentSource.trim() || null,
+            consentDate: consentDate ? `${consentDate}T00:00:00.000Z` : null,
+            consentNote: consentNote.trim() || null,
+          }
+        : {};
       const body = mode === "create"
-        ? { phoneNumber: phone, data, groupIds: pickedGroups, ...clientFieldPatch }
-        : { data, groupIds: pickedGroups, ...clientFieldPatch };
+        ? { phoneNumber: phone, data, groupIds: pickedGroups, ...clientFieldPatch, ...consentPatch }
+        : { data, groupIds: pickedGroups, ...clientFieldPatch, ...consentPatch };
       const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error ?? "Failed");
@@ -1000,6 +1060,64 @@ function ContactModal({
             </div>
           </div>
         )}
+
+        {/* Consent capture — the compliance layer's evidence field.
+            Prompted but not required (the wizard doesn't block save
+            on missing source/date), because forcing it would either
+            train users to lie or make them abandon adds — both worse
+            than a truthful "unknown". */}
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 space-y-3">
+          <div>
+            <Label htmlFor="c-consent-status" className="block mb-1.5">
+              How did they consent to messages?
+            </Label>
+            <select
+              id="c-consent-status"
+              value={consentStatus}
+              onChange={(e) => setConsentStatus(e.target.value)}
+              className="w-full h-9 px-3 rounded-md border border-zinc-300 bg-white text-sm"
+            >
+              <option value="explicit">Explicit — they opted in directly (form, verbal, WhatsApp reply)</option>
+              <option value="imported">Imported — moved over from another list where they had opted in</option>
+              <option value="unknown">Unknown — I don&apos;t have a clear record</option>
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              This shows on the contact so future you (or a teammate) can see
+              where consent came from. &ldquo;Unknown&rdquo; is fine — it&apos;s
+              honest, and the contact still receives messages; they just get
+              flagged as unverified on the compliance dashboard.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="c-consent-source" className="block mb-1.5">Source (optional)</Label>
+              <Input
+                id="c-consent-source"
+                value={consentSource}
+                onChange={(e) => setConsentSource(e.target.value)}
+                placeholder="e.g. Signup form on website"
+              />
+            </div>
+            <div>
+              <Label htmlFor="c-consent-date" className="block mb-1.5">Date consent given (optional)</Label>
+              <Input
+                id="c-consent-date"
+                type="date"
+                value={consentDate}
+                onChange={(e) => setConsentDate(e.target.value)}
+              />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="c-consent-note" className="block mb-1.5">Note (optional)</Label>
+            <Input
+              id="c-consent-note"
+              value={consentNote}
+              onChange={(e) => setConsentNote(e.target.value)}
+              placeholder="e.g. Agreed at event on Jan 12"
+            />
+          </div>
+        </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>

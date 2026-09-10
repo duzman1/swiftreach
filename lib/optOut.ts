@@ -119,7 +119,7 @@ export async function processOptOut(
   // stays null and the row falls out of client-filtered reports.
   const attributed = await attributeOptOut(userId, phoneNumber, now);
 
-  await prisma.optOutLog.create({
+  const optOutLog = await prisma.optOutLog.create({
     data: {
       userId,
       phoneNumber,
@@ -127,6 +127,24 @@ export async function processOptOut(
       source,
       campaignId: attributed?.campaignId ?? null,
     },
+  });
+
+  // Persist to phone-level DNC. This is the row that survives a
+  // contact-delete + re-import — SavedContact.optedOut lives on the
+  // contact record and dies with it; DoNotContact lives on the phone
+  // and doesn't. Upsert because a repeat STOP shouldn't create a
+  // second row (unique index would refuse); if we already have DNC
+  // for this phone, that's fine — the audit trail is OptOutLog, not
+  // this table.
+  await prisma.doNotContact.upsert({
+    where: { userId_phoneNumber: { userId, phoneNumber } },
+    create: {
+      userId,
+      phoneNumber,
+      reason: "opted_out",
+      sourceOptOutId: optOutLog.id,
+    },
+    update: {}, // keep the original row + createdAt
   });
 
   // Scrub from pending scheduled campaigns. contactListData is JSON; we

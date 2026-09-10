@@ -31,6 +31,24 @@ interface CreateBody {
   // Sending a foreign or unknown id returns 404; sending null (or
   // omitting) creates the contact unlabelled.
   clientId?: string | null;
+
+  // Consent provenance (all optional — never rejecting a create for
+  // missing consent, per compliance rule 4 "flag, don't block"). A
+  // caller that leaves consentStatus off gets the "unknown" default.
+  // A caller that sends "explicit" or "imported" gets exactly that —
+  // we never second-guess a positive assertion from the API caller,
+  // that's their record to make. The dashboard shows both counts so
+  // undeclared-provenance is visible without being blocked.
+  consentStatus?: "explicit" | "imported" | "unknown";
+  consentSource?: string | null;
+  consentDate?: string | null; // ISO
+  consentNote?: string | null;
+
+  // Optional link to a ContactImport row this contact came from. Set
+  // by the CSV import flow; API callers can also send it if they've
+  // pre-created an import record. Ignored if id doesn't belong to
+  // the user (never crashes — just drops the link).
+  importId?: string | null;
 }
 
 function bad(message: string, status = 400) {
@@ -155,6 +173,36 @@ export async function POST(req: NextRequest) {
       clientId = client.id;
     }
 
+    // Consent payload. Only include the fields the caller sent — an
+    // omitted consentStatus stays at whatever the row currently has
+    // (default "unknown" on create). We NEVER promote a row's consent
+    // silently; positive assertion means the caller sent it.
+    const consentStatus =
+      body.consentStatus === "explicit" || body.consentStatus === "imported"
+        ? body.consentStatus
+        : body.consentStatus === "unknown"
+          ? "unknown"
+          : undefined;
+    const now = new Date();
+    const consentCreate: Record<string, unknown> = {};
+    if (consentStatus) {
+      consentCreate.consentStatus = consentStatus;
+      consentCreate.consentRecordedAt = now;
+    }
+    if (body.consentSource !== undefined) consentCreate.consentSource = body.consentSource || null;
+    if (body.consentDate !== undefined) {
+      const d = body.consentDate ? new Date(body.consentDate) : null;
+      consentCreate.consentDate = d && !Number.isNaN(d.getTime()) ? d : null;
+    }
+    if (body.consentNote !== undefined) consentCreate.consentNote = body.consentNote || null;
+
+    // Validate importId if sent — must belong to this user.
+    let importId: string | null = null;
+    if (body.importId) {
+      const imp = await prisma.contactImport.findUnique({ where: { id: body.importId } });
+      if (imp && imp.userId === userId) importId = imp.id;
+    }
+
     // Upsert on (userId, phoneNumber) — idempotent re-add merges fields.
     // clientId is only set on the update branch if the caller sent one,
     // so re-adding a labelled contact with no clientId doesn't wipe it.
@@ -166,11 +214,15 @@ export async function POST(req: NextRequest) {
         data: JSON.stringify(body.data ?? {}),
         groupIds: JSON.stringify(groupIds),
         clientId,
+        importId,
+        ...consentCreate,
       },
       update: {
         data: JSON.stringify(body.data ?? {}),
         groupIds: JSON.stringify(groupIds),
         ...(body.clientId !== undefined ? { clientId } : {}),
+        ...(importId ? { importId } : {}),
+        ...consentCreate,
       },
     });
 

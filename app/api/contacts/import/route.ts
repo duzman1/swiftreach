@@ -33,6 +33,18 @@ interface ImportBody {
   // row that doesn't have its own clientId. Ignored on non-Pro plans
   // (validated once below, returns 403 upfront).
   defaultClientId?: string | null;
+
+  // Consent declaration for the whole import. Covers the common case
+  // ("all these came from our signup sheet on Jan 12"). Optional —
+  // when omitted every imported row gets consentStatus="unknown", per
+  // compliance rule 1 (never infer). fileName is stored on the
+  // ContactImport row so the contact's provenance survives even
+  // after the source file is gone.
+  fileName?: string;
+  declaredConsentStatus?: "explicit" | "imported" | "unknown";
+  declaredSource?: string | null;
+  declaredDate?: string | null; // ISO
+  declaredNote?: string | null;
 }
 
 function bad(message: string, status = 400) {
@@ -99,6 +111,33 @@ export async function POST(req: NextRequest) {
       for (const r of rows) clientOk.add(r.id);
     }
 
+    // Create the ContactImport row up front — one per import call —
+    // and thread its id onto every SavedContact we create. This is
+    // the ONLY thing that promotes contacts past consentStatus=
+    // "unknown" via automation: real, recorded provenance. We
+    // create it even when the caller declined to declare a source,
+    // so future you can still see "these 87 rows came from filename
+    // X uploaded by user Y at time Z" even without a source.
+    const declaredStatus =
+      body.declaredConsentStatus === "explicit" ||
+      body.declaredConsentStatus === "imported" ||
+      body.declaredConsentStatus === "unknown"
+        ? body.declaredConsentStatus
+        : undefined;
+    const declaredDate = body.declaredDate ? new Date(body.declaredDate) : null;
+    const declaredDateOk = declaredDate && !Number.isNaN(declaredDate.getTime()) ? declaredDate : null;
+    const importRow = await prisma.contactImport.create({
+      data: {
+        userId,
+        fileName: body.fileName?.trim() || "Untitled import",
+        uploadedByUserId: userId,
+        declaredSource: body.declaredSource?.trim() || null,
+        declaredDate: declaredDateOk,
+        declaredNote: body.declaredNote?.trim() || null,
+      },
+    });
+    const now = new Date();
+
     let created = 0;
     let updated = 0;
     let invalid = 0;
@@ -133,6 +172,17 @@ export async function POST(req: NextRequest) {
           : oldGroups;
         const oldData: Record<string, string> = JSON.parse(existing.data || "{}");
         const mergedData = { ...oldData, ...(row.data ?? {}) };
+        // Consent handling on re-import: NEVER downgrade. If the
+        // existing row already has "explicit", a re-import with
+        // "imported" doesn't overwrite that (that would rewrite
+        // history). Only promote: "unknown" → declared. Never
+        // demote. The import always gets linked (importId) though —
+        // provenance tracks the most recent recorded source.
+        const currentStatus = existing.consentStatus ?? "unknown";
+        const shouldPromote =
+          declaredStatus &&
+          currentStatus === "unknown" &&
+          declaredStatus !== "unknown";
         await prisma.savedContact.update({
           where: { id: existing.id },
           data: {
@@ -142,6 +192,20 @@ export async function POST(req: NextRequest) {
             // explicitly assigns one — a null clientId leaves the
             // prior label intact so a re-import doesn't wipe it.
             ...(clientId ? { clientId } : {}),
+            importId: importRow.id,
+            ...(shouldPromote
+              ? {
+                  consentStatus: declaredStatus,
+                  consentRecordedAt: now,
+                  ...(body.declaredSource !== undefined
+                    ? { consentSource: body.declaredSource || null }
+                    : {}),
+                  ...(declaredDateOk !== null ? { consentDate: declaredDateOk } : {}),
+                  ...(body.declaredNote !== undefined
+                    ? { consentNote: body.declaredNote || null }
+                    : {}),
+                }
+              : {}),
           },
         });
         updated++;
@@ -153,6 +217,18 @@ export async function POST(req: NextRequest) {
             data: JSON.stringify(row.data ?? {}),
             groupIds: groupIdJson,
             clientId,
+            importId: importRow.id,
+            // New rows inherit whatever the import declared. If the
+            // caller didn't declare, they get default "unknown".
+            ...(declaredStatus
+              ? {
+                  consentStatus: declaredStatus,
+                  consentRecordedAt: now,
+                  consentSource: body.declaredSource?.trim() || null,
+                  consentDate: declaredDateOk,
+                  consentNote: body.declaredNote?.trim() || null,
+                }
+              : {}),
           },
         });
         created++;

@@ -14,6 +14,11 @@ import { decrypt } from "@/lib/encrypt";
 import { checkMessageLimit, incrementMessageUsage } from "@/lib/usageCheck";
 import { logError } from "@/lib/errorLog";
 import { runCampaignAlerts } from "@/lib/campaignAlerts";
+import {
+  loadSuppressedSet,
+  classifySuppressions,
+  logSuppressed,
+} from "@/lib/checkSuppression";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro caps function maxDuration at 900s. The send loop checks
@@ -112,15 +117,14 @@ export async function GET(
   const creds = userCreds;
   const userIdLocal = userId;
 
-  // ── Opt-out lookup ────────────────────────────────────────────────────
-  // Pull every opted-out phone for this user up front so per-iteration
-  // checks are a Set membership test (O(1)) rather than a DB hit per
-  // contact. The set is captured into the stream closure.
-  const optedOutRows = await prisma.savedContact.findMany({
-    where: { userId, optedOut: true },
-    select: { phoneNumber: true },
-  });
-  const optedOutSet = new Set(optedOutRows.map((r) => r.phoneNumber));
+  // ── Suppression lookup ────────────────────────────────────────────────
+  // Single per-user pull that unions DoNotContact (persistent, survives
+  // contact re-import) with SavedContact.optedOut (live flag). One
+  // query, O(1) checks in the loop below. Each hit is logged to
+  // SuppressionLog with reason="do_not_contact" or "opted_out" via
+  // classifySuppressions() — that's our audit trail.
+  const suppressedSet = await loadSuppressedSet(prisma, userId);
+  const suppressedPhonesThisRun: string[] = [];
 
   // Mark sending start
   await prisma.campaign.update({
@@ -207,11 +211,13 @@ export async function GET(
             return;
           }
 
-          // ── Opt-out suppression ────────────────────────────────────────
-          // If this contact's phone is in the user's opt-out set, mark
-          // skipped instead of sending. Counts toward the campaign's
-          // skipped tally, not failed.
-          if (optedOutSet.has(c.phoneNumber)) {
+          // ── Suppression check (DNC + opted-out) ──────────────────────
+          // If this contact's phone is in the pre-loaded suppressed set,
+          // mark skipped instead of sending. The specific reason is
+          // classified + logged in the post-loop flush. Counts toward
+          // the campaign's skipped tally, not failed.
+          if (suppressedSet.has(c.phoneNumber)) {
+            suppressedPhonesThisRun.push(c.phoneNumber);
             await prisma.contact.update({
               where: { id: c.id },
               data: {
@@ -380,6 +386,33 @@ export async function GET(
           });
         } catch {
           /* ignore */
+        }
+
+        // Compliance audit — bulk-log every phone we suppressed this
+        // run. One insertMany, classified between "opted_out" and
+        // "do_not_contact". Runs regardless of terminal status: even
+        // a cancelled/paused run needs its up-to-that-point suppression
+        // history recorded (the send was refused, that's a fact).
+        if (suppressedPhonesThisRun.length > 0) {
+          try {
+            const reasons = await classifySuppressions(
+              prisma,
+              userIdLocal,
+              suppressedPhonesThisRun
+            );
+            await logSuppressed(
+              prisma,
+              suppressedPhonesThisRun.map((phone) => ({
+                userId: userIdLocal,
+                phoneNumber: phone,
+                surface: "campaign",
+                reason: reasons.get(phone) ?? "opted_out",
+                campaignId,
+              }))
+            );
+          } catch {
+            /* audit failure never blocks the send-loop close */
+          }
         }
 
         // Post-campaign alert engine — only runs on "completed"
