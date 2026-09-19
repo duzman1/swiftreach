@@ -41,12 +41,15 @@ export function ImportContacts({
   const groupFromUrl = searchParams?.get("group") ?? null;
   const [contactBookOpen, setContactBookOpen] = React.useState(false);
   const [audiencePickerOpen, setAudiencePickerOpen] = React.useState(false);
-  // True when FileUpload has swapped its drop zone for the multi-sheet
-  // picker. Used to hide the sibling import tiles (Google Drive /
-  // Contact Book / Saved Audience) so the picker isn't crammed into
-  // a narrow grid cell. FileUpload itself STAYS at the same position
-  // in the tree — see the file-header comment for why.
+  // Full-width flags per tile. Either FileUpload OR GoogleDrivePicker
+  // can bounce into a SheetPicker view for multi-tab workbooks; when
+  // that happens the OTHER tiles collapse so the picker isn't crammed
+  // into a narrow cell overlapping its neighbours. Both tiles stay
+  // mounted at their same position in the tree so their internal
+  // state (including the sheet picker) survives the layout change.
   const [fileUploadFullWidth, setFileUploadFullWidth] = React.useState(false);
+  const [driveFullWidth, setDriveFullWidth] = React.useState(false);
+  const anyTileFullWidth = fileUploadFullWidth || driveFullWidth;
 
   React.useEffect(() => {
     if (groupFromUrl && !parsed && !contactBookOpen) {
@@ -97,7 +100,7 @@ export function ImportContacts({
   // Grid vs single-column layout — only the container className
   // changes; FileUpload's position in the tree is stable, so its
   // internal state (including a live sheet picker) survives.
-  const containerClass = fileUploadFullWidth
+  const containerClass = anyTileFullWidth
     ? "space-y-3"
     : `grid grid-cols-1 ${cols} gap-3 items-stretch`;
 
@@ -107,18 +110,30 @@ export function ImportContacts({
         Import your contact list
       </p>
       <div className={containerClass}>
-        <FileUpload
-          parsed={null}
-          onParsed={onParsed}
-          onClear={onClear}
-          onFullWidthChange={setFileUploadFullWidth}
-        />
-        {/* Sibling tiles only render in grid mode. Hidden when
-            FileUpload is showing its multi-sheet picker so the picker
-            gets the full row. */}
-        {!fileUploadFullWidth && (
+        {/* FileUpload + GoogleDrivePicker are wrapped in stable divs
+            and hidden (rather than unmounted) when a sibling picker
+            is fullWidth — that way each picker's INTERNAL state
+            (including a live SheetPicker) survives the layout change.
+            The plain button tiles below are cheap to unmount/remount
+            because they carry no state. */}
+        <div hidden={driveFullWidth}>
+          <FileUpload
+            parsed={null}
+            onParsed={onParsed}
+            onClear={onClear}
+            onFullWidthChange={setFileUploadFullWidth}
+          />
+        </div>
+        {googleEnabled && (
+          <div hidden={fileUploadFullWidth}>
+            <GoogleDrivePicker
+              onParsed={onParsed}
+              onFullWidthChange={setDriveFullWidth}
+            />
+          </div>
+        )}
+        {!anyTileFullWidth && (
           <>
-            {googleEnabled && <GoogleDrivePicker onParsed={onParsed} />}
             <button
               type="button"
               onClick={() => setContactBookOpen(true)}
@@ -144,7 +159,7 @@ export function ImportContacts({
           </>
         )}
       </div>
-      {!fileUploadFullWidth && (
+      {!anyTileFullWidth && (
         <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
           <Upload className="w-3 h-3" />
           Files: .xlsx, .xlsm, or .csv with a header row.
