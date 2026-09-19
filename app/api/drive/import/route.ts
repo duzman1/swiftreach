@@ -25,10 +25,7 @@ import {
 } from "@/lib/parseFile";
 import { requireUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
-// Plans that may use Google Drive import. Any other value (incl. null /
-// "free") is rejected by the gate at the top of POST().
-const PAID_PLANS = ["starter", "growth"];
+import { isAtOrAbove } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -196,7 +193,11 @@ export async function POST(req: NextRequest) {
     where: { id: userId },
     select: { plan: true },
   });
-  if (!PAID_PLANS.includes(user?.plan ?? "free")) {
+  // isAtOrAbove keeps this correct for every current + future paid
+  // tier (Starter and up, including Pro). Earlier hard-coded
+  // ["starter","growth"] list was missing Pro and 403'd the highest
+  // paying plan.
+  if (!isAtOrAbove(user?.plan ?? null, "starter")) {
     return Response.json(
       {
         error: "Google Drive import requires a paid plan.",
