@@ -27,6 +27,12 @@ interface Props {
   parsed: ParsedFile | null;
   onParsed: (file: ParsedFile) => void;
   onClear: () => void;
+  /** Fired when the internal phase enters/leaves a "needs full width"
+   *  state — currently just the sheet-selection picker for multi-tab
+   *  workbooks. The parent (ImportContacts) uses this to collapse its
+   *  4-tile grid to a single column so the sheet picker doesn't sit
+   *  in a narrow cell next to three unrelated import tiles. */
+  onFullWidthChange?: (fullWidth: boolean) => void;
 }
 
 const ACCEPTED = ".xlsx,.xlsm,.csv";
@@ -41,9 +47,16 @@ type Phase =
   | { kind: "parsing"; sheetName?: string }
   | { kind: "error"; message: string };
 
-export function FileUpload({ parsed, onParsed, onClear }: Props) {
+export function FileUpload({ parsed, onParsed, onClear, onFullWidthChange }: Props) {
   const [dragActive, setDragActive] = React.useState(false);
   const [phase, setPhase] = React.useState<Phase>({ kind: "idle" });
+
+  // Notify the parent whenever the sheet picker is (or isn't) on
+  // screen. Kept as an effect so the callback fires AFTER render —
+  // avoids the "setState during render of parent" warning.
+  React.useEffect(() => {
+    onFullWidthChange?.(phase.kind === "sheet_selection");
+  }, [phase.kind, onFullWidthChange]);
   // Tracks whether the parsed file was auto-selected from a multi-sheet
   // workbook (only one tab had data). Used to show the "Using sheet: X"
   // notice in the done view.

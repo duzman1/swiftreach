@@ -38,6 +38,11 @@ export function ImportContacts({
   const groupFromUrl = searchParams?.get("group") ?? null;
   const [contactBookOpen, setContactBookOpen] = React.useState(false);
   const [audiencePickerOpen, setAudiencePickerOpen] = React.useState(false);
+  // True when FileUpload has swapped its drop zone for the multi-sheet
+  // picker. In that state the other three import tiles would look
+  // orphaned next to a wide picker — we collapse the grid and let
+  // FileUpload take the whole row instead.
+  const [fileUploadFullWidth, setFileUploadFullWidth] = React.useState(false);
 
   React.useEffect(() => {
     if (groupFromUrl && !parsed && !contactBookOpen) {
@@ -47,7 +52,28 @@ export function ImportContacts({
   }, [groupFromUrl]);
 
   if (parsed) {
-    return <FileUpload parsed={parsed} onParsed={onParsed} onClear={onClear} />;
+    return (
+      <FileUpload
+        parsed={parsed}
+        onParsed={onParsed}
+        onClear={onClear}
+        onFullWidthChange={setFileUploadFullWidth}
+      />
+    );
+  }
+
+  // Multi-sheet workbook uploaded — FileUpload is showing the sheet
+  // picker. Give it the full row; the other tiles would be dead space
+  // next to it (the user's already committed to a file).
+  if (fileUploadFullWidth) {
+    return (
+      <FileUpload
+        parsed={null}
+        onParsed={onParsed}
+        onClear={onClear}
+        onFullWidthChange={setFileUploadFullWidth}
+      />
+    );
   }
 
   if (contactBookOpen) {
@@ -84,8 +110,13 @@ export function ImportContacts({
       <p className="text-xs uppercase tracking-wide text-muted-foreground">
         Import your contact list
       </p>
-      <div className={`grid grid-cols-1 ${cols} gap-3`}>
-        <FileUpload parsed={null} onParsed={onParsed} onClear={onClear} />
+      <div className={`grid grid-cols-1 ${cols} gap-3 items-stretch`}>
+        <FileUpload
+          parsed={null}
+          onParsed={onParsed}
+          onClear={onClear}
+          onFullWidthChange={setFileUploadFullWidth}
+        />
         {googleEnabled && <GoogleDrivePicker onParsed={onParsed} />}
         <button
           type="button"
