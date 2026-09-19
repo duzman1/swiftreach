@@ -7,8 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SheetPicker } from "./SheetPicker";
 import type { ParsedFile, SheetMeta } from "@/lib/parseFile";
-
-const PAID_PLANS = ["starter", "growth"];
+import { isAtOrAbove } from "@/lib/plans";
 
 // Minimal type stubs for the runtime-loaded Google globals so we don't need
 // the full @types/google.picker / @types/gapi dependency chain.
@@ -265,11 +264,18 @@ export function GoogleDrivePicker({ onParsed }: Props) {
 
   async function start() {
     // Plan gate FIRST — before touching Google credentials, the picker
-    // SDK, or anything else. Free (and unknown / still-loading) users
-    // get redirected to /billing with the feature query param so the
-    // billing page can show context. The server route /api/drive/import
-    // also rechecks, so devtools / curl can't bypass.
-    if (!PAID_PLANS.includes(userPlan?.toLowerCase() ?? "free")) {
+    // SDK, or anything else. Anyone below Starter (and unknown /
+    // still-loading users) gets redirected to /billing with the feature
+    // query param so the billing page can show context. The server
+    // routes /api/drive/import + /api/drive/sheets also recheck, so
+    // devtools / curl can't bypass.
+    //
+    // isAtOrAbove is the single-source-of-truth from lib/plans.ts so
+    // this stays correct when new tiers are added. Pro (and any
+    // future higher tier) is INCLUDED — an earlier hard-coded
+    // ["starter","growth"] list forgot Pro and locked the top-paying
+    // plan out of a feature they were paying for.
+    if (!isAtOrAbove(userPlan, "starter")) {
       router.push("/billing?feature=google-drive-import");
       return;
     }

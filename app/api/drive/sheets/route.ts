@@ -11,11 +11,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { isAtOrAbove } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-
-const PAID_PLANS = ["starter", "growth"];
 
 interface RequestBody {
   fileId?: string;
@@ -53,7 +52,10 @@ export async function POST(req: NextRequest) {
     where: { id: userId },
     select: { plan: true },
   });
-  if (!PAID_PLANS.includes(user?.plan ?? "free")) {
+  // isAtOrAbove keeps this correct for every current + future paid
+  // tier — a prior hard-coded ["starter","growth"] array forgot Pro
+  // and 403'd users on the top plan.
+  if (!isAtOrAbove(user?.plan ?? null, "starter")) {
     return NextResponse.json(
       {
         error: "Google Drive import requires a paid plan.",
