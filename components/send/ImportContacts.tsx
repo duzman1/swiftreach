@@ -17,15 +17,18 @@ interface Props {
 }
 
 /**
- * Three-up layout: file upload, Google Drive (optional), and the Contact
- * Book picker. Once a file is parsed (from any source), collapses into the
- * single file-chip view rendered by FileUpload.
+ * Four-up layout (three if Google Drive isn't configured): file upload,
+ * Google Drive, Contact Book, Saved Audience. When a file is fully
+ * parsed, collapses into the single file-chip view rendered by
+ * FileUpload. When FileUpload has bounced into its multi-sheet picker,
+ * we KEEP FileUpload mounted at the same position — hiding the sibling
+ * tiles and dropping the grid layout — so its internal `phase` state
+ * survives (an earlier version rendered a second FileUpload in that
+ * branch, which unmounted the first and reset its phase back to
+ * "idle", killing the sheet picker before the user could see it).
  *
- * The Google Drive option only renders when NEXT_PUBLIC_GOOGLE_CLIENT_ID is
- * set — it's fully optional.
- *
- * The Contact Book auto-opens when ?group=<id> is present in the URL — the
- * /contacts → "Use in Campaign" deep-link relies on this.
+ * The Contact Book auto-opens when ?group=<id> is present in the URL —
+ * the /contacts → "Use in Campaign" deep-link relies on this.
  */
 export function ImportContacts({
   parsed,
@@ -39,9 +42,10 @@ export function ImportContacts({
   const [contactBookOpen, setContactBookOpen] = React.useState(false);
   const [audiencePickerOpen, setAudiencePickerOpen] = React.useState(false);
   // True when FileUpload has swapped its drop zone for the multi-sheet
-  // picker. In that state the other three import tiles would look
-  // orphaned next to a wide picker — we collapse the grid and let
-  // FileUpload take the whole row instead.
+  // picker. Used to hide the sibling import tiles (Google Drive /
+  // Contact Book / Saved Audience) so the picker isn't crammed into
+  // a narrow grid cell. FileUpload itself STAYS at the same position
+  // in the tree — see the file-header comment for why.
   const [fileUploadFullWidth, setFileUploadFullWidth] = React.useState(false);
 
   React.useEffect(() => {
@@ -55,20 +59,6 @@ export function ImportContacts({
     return (
       <FileUpload
         parsed={parsed}
-        onParsed={onParsed}
-        onClear={onClear}
-        onFullWidthChange={setFileUploadFullWidth}
-      />
-    );
-  }
-
-  // Multi-sheet workbook uploaded — FileUpload is showing the sheet
-  // picker. Give it the full row; the other tiles would be dead space
-  // next to it (the user's already committed to a file).
-  if (fileUploadFullWidth) {
-    return (
-      <FileUpload
-        parsed={null}
         onParsed={onParsed}
         onClear={onClear}
         onFullWidthChange={setFileUploadFullWidth}
@@ -102,49 +92,64 @@ export function ImportContacts({
     );
   }
 
-  // Four import options when Google is enabled (2×2), three when not.
+  // Four import options when Google is enabled, three when not.
   const cols = googleEnabled ? "md:grid-cols-4" : "md:grid-cols-3";
+  // Grid vs single-column layout — only the container className
+  // changes; FileUpload's position in the tree is stable, so its
+  // internal state (including a live sheet picker) survives.
+  const containerClass = fileUploadFullWidth
+    ? "space-y-3"
+    : `grid grid-cols-1 ${cols} gap-3 items-stretch`;
 
   return (
     <div className="space-y-3">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">
         Import your contact list
       </p>
-      <div className={`grid grid-cols-1 ${cols} gap-3 items-stretch`}>
+      <div className={containerClass}>
         <FileUpload
           parsed={null}
           onParsed={onParsed}
           onClear={onClear}
           onFullWidthChange={setFileUploadFullWidth}
         />
-        {googleEnabled && <GoogleDrivePicker onParsed={onParsed} />}
-        <button
-          type="button"
-          onClick={() => setContactBookOpen(true)}
-          className="rounded-lg border border-dashed border-zinc-300 bg-background hover:border-whatsapp hover:bg-emerald-50/50 transition-colors p-4 flex flex-col items-center justify-center text-center gap-2 min-h-[140px]"
-        >
-          <BookOpen className="w-6 h-6 text-whatsapp" />
-          <div className="font-medium text-sm">Contact Book</div>
-          <div className="text-xs text-muted-foreground">
-            Pick from your saved contacts or a group
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setAudiencePickerOpen(true)}
-          className="rounded-lg border border-dashed border-zinc-300 bg-background hover:border-whatsapp hover:bg-emerald-50/50 transition-colors p-4 flex flex-col items-center justify-center text-center gap-2 min-h-[140px]"
-        >
-          <Users className="w-6 h-6 text-whatsapp" />
-          <div className="font-medium text-sm">Saved Audience</div>
-          <div className="text-xs text-muted-foreground">
-            Rule-based list — stays current as contacts change
-          </div>
-        </button>
+        {/* Sibling tiles only render in grid mode. Hidden when
+            FileUpload is showing its multi-sheet picker so the picker
+            gets the full row. */}
+        {!fileUploadFullWidth && (
+          <>
+            {googleEnabled && <GoogleDrivePicker onParsed={onParsed} />}
+            <button
+              type="button"
+              onClick={() => setContactBookOpen(true)}
+              className="rounded-lg border border-dashed border-zinc-300 bg-background hover:border-whatsapp hover:bg-emerald-50/50 transition-colors p-4 flex flex-col items-center justify-center text-center gap-2 min-h-[140px]"
+            >
+              <BookOpen className="w-6 h-6 text-whatsapp" />
+              <div className="font-medium text-sm">Contact Book</div>
+              <div className="text-xs text-muted-foreground">
+                Pick from your saved contacts or a group
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAudiencePickerOpen(true)}
+              className="rounded-lg border border-dashed border-zinc-300 bg-background hover:border-whatsapp hover:bg-emerald-50/50 transition-colors p-4 flex flex-col items-center justify-center text-center gap-2 min-h-[140px]"
+            >
+              <Users className="w-6 h-6 text-whatsapp" />
+              <div className="font-medium text-sm">Saved Audience</div>
+              <div className="text-xs text-muted-foreground">
+                Rule-based list — stays current as contacts change
+              </div>
+            </button>
+          </>
+        )}
       </div>
-      <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-        <Upload className="w-3 h-3" />
-        Files: .xlsx, .xlsm, or .csv with a header row.
-      </p>
+      {!fileUploadFullWidth && (
+        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+          <Upload className="w-3 h-3" />
+          Files: .xlsx, .xlsm, or .csv with a header row.
+        </p>
+      )}
     </div>
   );
 }
