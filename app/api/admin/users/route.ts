@@ -7,6 +7,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/adminAuth";
 import { handleApiError } from "@/lib/apiResponse";
+import { getPlan } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,14 @@ export async function GET(req: NextRequest) {
         { lastName: { contains: search, mode: "insensitive" } },
       ];
     }
-    if (plan && ["free", "starter", "growth"].includes(plan)) {
+    // Validated through lib/plans.ts: getPlan() returns the "free"
+    // fallback for anything it doesn't recognise, so `id === plan`
+    // is true only when `plan` is a real tier. Earlier hand-rolled
+    // ["free","starter","growth"] list forgot Pro — a ?plan=pro
+    // query silently fell through, returning ALL users instead of
+    // just Pro (worse than an error). This form self-updates when
+    // a new tier is added to PLANS.
+    if (plan && getPlan(plan).id === plan) {
       where.plan = plan;
     }
     if (status === "suspended") {

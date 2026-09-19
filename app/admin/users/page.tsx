@@ -134,6 +134,7 @@ export default function AdminUsersPage() {
             <option value="free">Free</option>
             <option value="starter">Starter</option>
             <option value="growth">Growth</option>
+            <option value="pro">Pro</option>
           </select>
           <select
             value={status}
