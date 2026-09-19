@@ -78,6 +78,12 @@ const ALLOWED_MIMES = [
 
 interface Props {
   onParsed: (parsed: ParsedFile) => void;
+  /** Fired when the picker enters/leaves a "needs full width" state
+   *  (currently just the multi-tab SheetPicker after a Google Sheet
+   *  is chosen). Parent uses this to collapse the 4-tile grid so the
+   *  picker isn't cramped in a single narrow cell overlapping its
+   *  neighbours — mirrors the same signal FileUpload emits. */
+  onFullWidthChange?: (fullWidth: boolean) => void;
 }
 
 // Sheet selection payload returned by /api/drive/import or /api/drive/sheets
@@ -123,9 +129,18 @@ function loadScriptOnce(src: string): Promise<void> {
   });
 }
 
-export function GoogleDrivePicker({ onParsed }: Props) {
+export function GoogleDrivePicker({ onParsed, onFullWidthChange }: Props) {
   const router = useRouter();
   const [phase, setPhase] = React.useState<Phase>("idle");
+
+  // Tell the parent whenever the sheet picker is on screen so it
+  // can hide the sibling tiles and drop the grid layout. Same
+  // pattern FileUpload uses — see the file-header comment on
+  // components/send/ImportContacts.tsx for why the callback fires
+  // from an effect (not during render).
+  React.useEffect(() => {
+    onFullWidthChange?.(phase === "sheet_selection");
+  }, [phase, onFullWidthChange]);
   const [activeName, setActiveName] = React.useState<string>("");
   const [error, setError] = React.useState<string | null>(null);
   const [selection, setSelection] = React.useState<SheetSelectionState | null>(
