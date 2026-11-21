@@ -96,6 +96,13 @@ export default function InboxPage() {
   const [replyText, setReplyText] = useState("");
   const [replying, setReplying] = useState(false);
 
+  // Bulk-select state. Kept as a Set for O(1) membership checks on
+  // every row render; converted to array only at delete time. Cleared
+  // whenever the list reloads (search, unread filter, after delete)
+  // so a user doesn't accidentally wipe a message that isn't visible.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   async function loadList() {
     setListLoading(true);
     try {
@@ -110,6 +117,17 @@ export default function InboxPage() {
       }
       if (!j.ok) throw new Error(j.error ?? "Failed to load");
       setList(j.messages);
+      // Any selection the user built up may now reference messages no
+      // longer in the visible list (search narrowed, unread filter
+      // flipped, etc.). Prune to only what's still on screen so we
+      // never delete a row the user can't see.
+      setSelected((prev) => {
+        if (prev.size === 0) return prev;
+        const visible = new Set<string>(j.messages.map((m: InboundMessage) => m.id));
+        const next = new Set<string>();
+        for (const id of prev) if (visible.has(id)) next.add(id);
+        return next.size === prev.size ? prev : next;
+      });
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -211,10 +229,76 @@ export default function InboxPage() {
     }
   }
 
+  // ── Bulk selection helpers ──────────────────────────────────────
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelected(new Set());
+  }
+  function selectAllVisible() {
+    if (!list) return;
+    // All-or-nothing toggle: if every visible row is already
+    // selected, clicking again clears. Matches GMail / most inbox UIs.
+    const allSelected = list.length > 0 && list.every((m) => selected.has(m.id));
+    setSelected(allSelected ? new Set() : new Set(list.map((m) => m.id)));
+  }
+
+  async function bulkDelete() {
+    if (selected.size === 0) return;
+    if (
+      !confirm(
+        `Delete ${selected.size} conversation${selected.size === 1 ? "" : "s"}? Replies will also be removed. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    const ids = Array.from(selected);
+    setBulkDeleting(true);
+    try {
+      const r = await fetch("/api/inbox/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error ?? "Bulk delete failed");
+      toast.success(
+        `Deleted ${j.deleted} conversation${j.deleted === 1 ? "" : "s"}`
+      );
+      // If the currently-open conversation was in the batch, close
+      // the right pane so the user isn't looking at a ghost message.
+      if (selectedId && ids.includes(selectedId)) {
+        closeDetail();
+      }
+      clearSelection();
+      await loadList();
+      // Unread-badge may have changed — ping the sidebar.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("inbox:read"));
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Bulk delete failed");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   const unreadCount = useMemo(
     () => (list ? list.filter((m) => !m.read).length : 0),
     [list]
   );
+  // "All visible rows selected?" — used to toggle the header checkbox
+  // between checked / indeterminate / unchecked states.
+  const allVisibleSelected =
+    (list?.length ?? 0) > 0 && (list ?? []).every((m) => selected.has(m.id));
+  const someVisibleSelected =
+    !allVisibleSelected && (list ?? []).some((m) => selected.has(m.id));
 
   if (upgradeRequired) {
     return (
@@ -261,15 +345,70 @@ export default function InboxPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-              <input
-                type="checkbox"
-                checked={filterUnread}
-                onChange={(e) => setFilterUnread(e.target.checked)}
-              />
-              Show unread only
-            </label>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filterUnread}
+                  onChange={(e) => setFilterUnread(e.target.checked)}
+                />
+                Show unread only
+              </label>
+              {/* Select-all toggle. Hidden until there's at least one
+                  row to select — otherwise it just looks like dead UI. */}
+              {list && list.length > 0 && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    ref={(el) => {
+                      // Native indeterminate state can only be set
+                      // imperatively — React doesn't expose it as a
+                      // prop. Set it on every render to reflect
+                      // "some but not all" selection.
+                      if (el) el.indeterminate = someVisibleSelected;
+                    }}
+                    checked={allVisibleSelected}
+                    onChange={selectAllVisible}
+                  />
+                  Select all
+                </label>
+              )}
+            </div>
           </div>
+
+          {/* Bulk-action bar. Appears only when at least one row is
+              selected, so the normal filter area stays clean. */}
+          {selected.size > 0 && (
+            <div className="px-3 py-2 border-b bg-emerald-50 flex items-center justify-between gap-2 text-sm">
+              <div className="font-medium text-emerald-900">
+                {selected.size} selected
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearSelection}
+                  disabled={bulkDeleting}
+                >
+                  Clear
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={bulkDelete}
+                  disabled={bulkDeleting}
+                  className="gap-1.5"
+                >
+                  {bulkDeleting ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
+                  )}
+                  Delete
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="overflow-y-auto flex-1">
             {listLoading && !list && (
               <div className="p-8 text-center text-muted-foreground text-sm">
@@ -287,37 +426,61 @@ export default function InboxPage() {
               </div>
             )}
             <ul className="divide-y">
-              {list?.map((m) => (
-                <li key={m.id}>
-                  <button
-                    onClick={() => openMessage(m.id)}
-                    className={`w-full text-left px-4 py-3 transition-colors hover:bg-zinc-50 ${
-                      selectedId === m.id ? "bg-emerald-50 hover:bg-emerald-50" : ""
+              {list?.map((m) => {
+                const isSelected = selected.has(m.id);
+                const isOpen = selectedId === m.id;
+                return (
+                  <li
+                    key={m.id}
+                    className={`flex items-stretch transition-colors hover:bg-zinc-50 ${
+                      isOpen
+                        ? "bg-emerald-50 hover:bg-emerald-50"
+                        : isSelected
+                          ? "bg-emerald-50/40"
+                          : ""
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      {!m.read && (
-                        <span
-                          className="w-2 h-2 rounded-full bg-red-500 shrink-0"
-                          aria-label="Unread"
-                        />
-                      )}
-                      <span className="font-medium text-sm truncate flex-1">
-                        {m.contactName || "Unknown"}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground shrink-0">
-                        {timeAgo(m.createdAt)}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground mb-0.5 font-mono">
-                      +{m.fromPhone}
-                    </div>
-                    <div className="text-sm text-zinc-700 line-clamp-2">
-                      {m.messageText}
-                    </div>
-                  </button>
-                </li>
-              ))}
+                    {/* Checkbox column. Separate <label> so the hit
+                        target is the whole column, not just the box.
+                        stopPropagation on the click isn't needed —
+                        the label and the row body are siblings, not
+                        nested, so the row-open button never fires. */}
+                    <label className="flex items-center justify-center pl-3 pr-1 cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelected(m.id)}
+                        aria-label={`Select conversation from ${m.contactName || "Unknown"}`}
+                      />
+                    </label>
+                    <button
+                      onClick={() => openMessage(m.id)}
+                      className="flex-1 text-left px-3 py-3 min-w-0"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        {!m.read && (
+                          <span
+                            className="w-2 h-2 rounded-full bg-red-500 shrink-0"
+                            aria-label="Unread"
+                          />
+                        )}
+                        <span className="font-medium text-sm truncate flex-1">
+                          {m.contactName || "Unknown"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground shrink-0">
+                          {timeAgo(m.createdAt)}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mb-0.5 font-mono">
+                        +{m.fromPhone}
+                      </div>
+                      <div className="text-sm text-zinc-700 line-clamp-2">
+                        {m.messageText}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </Card>
