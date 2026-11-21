@@ -15,6 +15,21 @@ import { AdminSidebar, AdminMobileTopbar } from "@/components/admin/AdminSidebar
 
 export const dynamic = "force-dynamic";
 
+// Defense-in-depth against SEO leaks. Admin routes are already
+// gated by middleware.ts + requireAdmin(), but if any future
+// misconfiguration lets a crawler through, this header keeps the
+// page out of search indices and prevents link-following into
+// deeper /admin/* pages. Robots.txt also disallows /admin — this
+// is the belt + braces.
+export const metadata = {
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: { index: false, follow: false, noimageindex: true },
+  },
+};
+
 export default async function AdminLayout({
   children,
 }: {
