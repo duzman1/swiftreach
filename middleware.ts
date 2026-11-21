@@ -38,6 +38,9 @@ const isPublicRoute = createRouteMatcher([
   "/api/clerk-webhook",         // Clerk user lifecycle webhook
   "/api/billing/webhook",       // Stripe billing webhook
   "/api/cron/(.*)",             // Vercel Cron — protected by CRON_SECRET header
+  "/api/csp-report",            // CSP violation collector — browsers POST here
+                                // from any page (incl. signed-out), with no
+                                // session cookie. Rate-limited server-side.
 ]);
 
 export default clerkMiddleware(async (auth, request) => {

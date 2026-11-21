@@ -44,6 +44,91 @@ const nextConfig = {
   },
 
   async headers() {
+    // ── Content Security Policy — Report-Only (phase 1) ──────────────
+    //
+    // Ships as `Content-Security-Policy-Report-Only` first so the
+    // browser REPORTS violations but doesn't block them. We'll watch
+    // /api/csp-report for a day or two, tighten anything that fires,
+    // then a follow-up branch flips this to the enforcing header
+    // name.
+    //
+    // Origin map (why each entry is here):
+    //   self, data:, blob:        app assets + inline-generated images
+    //   clerk.swiftreach.app      Clerk's JS bundle, UI, auth iframes
+    //   *.clerk.accounts.dev      Clerk's JWT exchange + cookie bridge
+    //   challenges.cloudflare.com Clerk's bot-protection (Turnstile)
+    //   apis.google.com           Google Picker loader (Drive import)
+    //   accounts.google.com       Google OAuth consent iframe + GIS
+    //   *.googleapis.com          Sheets + Drive REST (browser-side)
+    //   connect.facebook.net      Meta JS SDK (components/MetaSDK.tsx)
+    //   *.facebook.com            Meta Embedded Signup iframe
+    //
+    // 'unsafe-inline' + 'unsafe-eval' on script-src kept for phase 1:
+    //   - Next.js emits inline RSC payload scripts (__next_f.push) with
+    //     no nonce in the default pipeline
+    //   - Clerk's JS uses dynamic evaluation internally
+    //   Phase 2 introduces per-request nonces via middleware so we can
+    //   drop 'unsafe-inline' for scripts. 'unsafe-inline' on style-src
+    //   stays — Next inlines Tailwind styles and the browsers don't
+    //   accept nonces for most inline styles anyway.
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'", // mirrors X-Frame-Options: DENY, modern form
+      "form-action 'self' https://*.facebook.com https://accounts.google.com",
+      // Scripts — see loose-ness note above
+      [
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "https://clerk.swiftreach.app",
+        "https://challenges.cloudflare.com",
+        "https://apis.google.com",
+        "https://accounts.google.com",
+        "https://connect.facebook.net",
+      ].join(" "),
+      [
+        "script-src-elem 'self' 'unsafe-inline'",
+        "https://clerk.swiftreach.app",
+        "https://challenges.cloudflare.com",
+        "https://apis.google.com",
+        "https://accounts.google.com",
+        "https://connect.facebook.net",
+      ].join(" "),
+      // Styles — Next + Clerk inline CSS; data: for Clerk UI SVGs
+      "style-src 'self' 'unsafe-inline' https://clerk.swiftreach.app",
+      "style-src-elem 'self' 'unsafe-inline' https://clerk.swiftreach.app",
+      // Images — permissive on purpose. Next/Image, user-uploaded
+      // logos, Clerk avatars, OG previews etc. come from many hosts.
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data: https://clerk.swiftreach.app",
+      // XHR / fetch / WebSocket destinations
+      [
+        "connect-src 'self'",
+        "https://clerk.swiftreach.app",
+        "https://*.clerk.accounts.dev",
+        "wss://clerk.swiftreach.app",
+        "https://sheets.googleapis.com",
+        "https://www.googleapis.com",
+        "https://graph.facebook.com",
+      ].join(" "),
+      // Frames the app embeds (Clerk UI, Meta Embedded Signup,
+      // Google OAuth, Turnstile)
+      [
+        "frame-src 'self'",
+        "https://clerk.swiftreach.app",
+        "https://challenges.cloudflare.com",
+        "https://*.facebook.com",
+        "https://web.facebook.com",
+        "https://accounts.google.com",
+      ].join(" "),
+      // Workers for Clerk UI + Next
+      "worker-src 'self' blob:",
+      // Reporting
+      "report-uri /api/csp-report",
+      // Nudge mixed-content requests to HTTPS before they get blocked
+      "upgrade-insecure-requests",
+    ].join("; ");
+
     return [
       {
         source: "/(.*)",
@@ -52,6 +137,11 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-XSS-Protection", value: "1; mode=block" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Report-only — this header NEVER blocks a request, it just
+          // posts a report to /api/csp-report. Safe to ship. Phase 2
+          // (separate branch) renames to `Content-Security-Policy`
+          // to enforce, once the violation log is quiet.
+          { key: "Content-Security-Policy-Report-Only", value: csp },
         ],
       },
     ];
