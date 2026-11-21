@@ -12,6 +12,12 @@
 import type { Metadata } from "next";
 import { LegalPage, LegalSection, type Section } from "@/components/legal/LegalPage";
 
+// Pure content page, no auth touch — pre-render at build time + ISR
+// so a visitor spike doesn't hit origin on every click. Bump the
+// lastUpdated string in the page to invalidate before the next day.
+export const dynamic = "force-static";
+export const revalidate = 86400; // 24h
+
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:

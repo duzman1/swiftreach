@@ -25,6 +25,13 @@ const isPublicRoute = createRouteMatcher([
   "/privacy",                   // Public legal page — Google OAuth requires it
   "/data-deletion",             // Public legal page — Meta App Review requires it
   "/developers",                // Public API documentation
+  // SEO infrastructure. Without these Google/Bing crawlers get 307'd
+  // to /sign-in and never see our content — effectively uncrawlable.
+  // Served by app/robots.ts, app/sitemap.ts, app/opengraph-image.tsx.
+  "/robots.txt",
+  "/sitemap.xml",
+  "/opengraph-image(.*)",
+  "/twitter-image(.*)",
   "/api/webhook(.*)",           // Meta WhatsApp webhook (incl. /api/webhook/[userId])
   "/api/webhooks/(.*)",         // Developer-facing webhook API (auth via API key)
   "/api/zapier/(.*)",           // Zapier auth + actions (auth via API key)
