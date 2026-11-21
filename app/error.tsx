@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { AlertCircle, RotateCcw } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle, RotateCcw, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -36,10 +37,22 @@ export default function GlobalError({
               Reference: <code className="font-mono">{error.digest}</code>
             </p>
           )}
-          <Button onClick={reset} className="gap-2">
-            <RotateCcw className="w-4 h-4" />
-            Try again
-          </Button>
+          {/* Two escape hatches. Try again covers transient errors
+              (network blip, SSR race); Back to home gets the user
+              out of a persistent-failure state so they're not stuck
+              on a spinning page. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={reset} className="gap-2">
+              <RotateCcw className="w-4 h-4" />
+              Try again
+            </Button>
+            <Link href="/">
+              <Button variant="outline" className="gap-2">
+                <Home className="w-4 h-4" />
+                Back to home
+              </Button>
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </div>
