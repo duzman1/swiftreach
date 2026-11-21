@@ -10,6 +10,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection, type Section } from "@/components/legal/LegalPage";
 
+// Pre-render at build time (see rationale in app/privacy/page.tsx).
+export const dynamic = "force-static";
+export const revalidate = 86400;
+
 export const metadata: Metadata = {
   title: "Terms of Service",
   description:

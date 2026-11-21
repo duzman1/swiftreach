@@ -10,8 +10,16 @@ import Image from "next/image";
 import { ArrowRight, ExternalLink } from "lucide-react";
 import { ApiTester } from "@/components/developers/ApiTester";
 
+// Static shell + client-side interactive tester. Safe to pre-render
+// at build time because the ApiTester component is a client component
+// that calls /api/webhooks/trigger from the browser, not during SSR.
+export const dynamic = "force-static";
+export const revalidate = 86400;
+
 export const metadata: Metadata = {
-  title: "Developers — SwiftReach API",
+  // Title template from app/layout.tsx appends " · SwiftReach", so
+  // this renders as "Developers API · SwiftReach" — no double brand.
+  title: "Developers API",
   description:
     "Connect SwiftReach to Zapier, Make, n8n, or any app using our webhook API. Send personalized WhatsApp messages with a single REST call.",
 };
