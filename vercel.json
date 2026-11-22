@@ -19,6 +19,9 @@
     "app/api/cron/automations/route.ts": {
       "maxDuration": 900
     },
+    "app/api/cron/webhook-retry/route.ts": {
+      "maxDuration": 300
+    },
     "app/api/drive/import/route.ts": {
       "maxDuration": 60
     },
@@ -42,6 +45,10 @@
     {
       "path": "/api/cron/automations",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/webhook-retry",
+      "schedule": "* * * * *"
     }
   ]
 }

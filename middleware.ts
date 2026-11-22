@@ -33,7 +33,11 @@ const isPublicRoute = createRouteMatcher([
   "/opengraph-image(.*)",
   "/twitter-image(.*)",
   "/api/webhook(.*)",           // Meta WhatsApp webhook (incl. /api/webhook/[userId])
-  "/api/webhooks/(.*)",         // Developer-facing webhook API (auth via API key)
+  // Developer-facing webhook API (auth via API key). Narrowed to just
+  // /trigger — the sibling /endpoints/* and /deliveries routes are
+  // management endpoints that use Clerk session auth, so they must
+  // NOT be in the public-route list.
+  "/api/webhooks/trigger",
   "/api/zapier/(.*)",           // Zapier auth + actions (auth via API key)
   "/api/clerk-webhook",         // Clerk user lifecycle webhook
   "/api/billing/webhook",       // Stripe billing webhook

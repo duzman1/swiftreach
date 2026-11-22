@@ -106,16 +106,38 @@ export async function POST(
 
     // Always log the reply attempt — failed replies still help the user
     // see "I tried, here's why it didn't work" in the conversation thread.
-    const reply = await prisma.outboundReply.create({
-      data: {
-        userId,
-        inboundMessageId: inbound.id,
-        toPhone: inbound.fromPhone,
-        messageText: text,
-        whatsappMsgId: result.success ? result.messageId : null,
-        status: result.success ? "sent" : "failed",
-      },
-    });
+    //
+    // Transactional with the OutboundMessage mirror so the two ledgers
+    // can't drift (the inbox UI reads from OutboundReply; the outbound
+    // webhook dispatcher reads from OutboundMessage). If either insert
+    // fails, neither commits — the user sees the error and can retry.
+    const [reply] = await prisma.$transaction([
+      prisma.outboundReply.create({
+        data: {
+          userId,
+          inboundMessageId: inbound.id,
+          toPhone: inbound.fromPhone,
+          messageText: text,
+          whatsappMsgId: result.success ? result.messageId : null,
+          status: result.success ? "sent" : "failed",
+        },
+      }),
+      prisma.outboundMessage.create({
+        data: {
+          userId,
+          source: "REPLY",
+          phone: inbound.fromPhone,
+          whatsappMsgId: result.success ? (result.messageId ?? null) : null,
+          status: result.success ? "sent" : "failed",
+          errorMessage: result.success ? null : (result.error?.message ?? null),
+          failedAt: result.success ? null : new Date(),
+        },
+      }),
+    ]);
+    // (lib/outboundMessage.ts's recordOutboundMessage uses upsert on
+    // wamid; inside a $transaction array that call style doesn't
+    // compose cleanly, so we inline the create above instead. Same
+    // row shape either way.)
 
     if (result.success) {
       await incrementMessageUsage(userId, 1);

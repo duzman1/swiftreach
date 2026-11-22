@@ -31,6 +31,7 @@ import {
   type SendError,
 } from "@/lib/whatsapp";
 import { checkSuppression } from "@/lib/checkSuppression";
+import { recordOutboundMessage } from "@/lib/outboundMessage";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,44 @@ interface TriggerBody {
   variables?: Record<string, unknown> | string;
   language?: string;
   api_key?: string;
+  // Caller-supplied correlation id. Stored verbatim on OutboundMessage
+  // and echoed back in every outbound webhook event (message.sent /
+  // delivered / read / failed) so an integration can tie the event to
+  // its own record without needing to track wamids. Fully optional.
+  external_id?: string;
+}
+
+// Validation cap on external_id. Matches most downstream systems'
+// id-field lengths (Stripe metadata values, GHL contact external_id,
+// HubSpot record ids). Long enough for UUIDs + namespaced ids,
+// short enough that a megabyte of garbage can't be smuggled into
+// the DB via this field.
+const MAX_EXTERNAL_ID_LEN = 128;
+
+function validateExternalId(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, value: null };
+  }
+  if (typeof raw !== "string") {
+    return { ok: false, error: "external_id must be a string" };
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  if (trimmed.length > MAX_EXTERNAL_ID_LEN) {
+    return {
+      ok: false,
+      error: `external_id must be ${MAX_EXTERNAL_ID_LEN} characters or fewer`,
+    };
+  }
+  // Reject control characters (anything below U+0020 except tab, and
+  // DEL). These aren't valid in any real id scheme and tend to be
+  // smuggled in via copy-paste or encoding bugs. Everything else —
+  // Unicode letters, dashes, underscores, colons, dots — passes.
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x08\x0A-\x1F\x7F]/.test(trimmed)) {
+    return { ok: false, error: "external_id contains invalid control characters" };
+  }
+  return { ok: true, value: trimmed };
 }
 
 const DOCS_URL = "https://www.swiftreach.app/developers";
@@ -218,6 +257,16 @@ export async function POST(request: NextRequest) {
         400
       );
     }
+
+    // Validate external_id up front — a clean 400 before we touch
+    // Meta or the DB. Fully optional; result.value === null when
+    // omitted or empty, which flows through to OutboundMessage as
+    // null and dispatcher payloads as null.
+    const extIdResult = validateExternalId(body.external_id);
+    if (!extIdResult.ok) {
+      return errorResponse(extIdResult.error, 400);
+    }
+    const externalId = extIdResult.value;
 
     // Step 1 — authenticate.
     try {
@@ -489,6 +538,23 @@ export async function POST(request: NextRequest) {
         errorMessage: errMsg,
         responseTimeMs: Date.now() - startTime,
       });
+      // Also record in the unified outbound ledger — a failed dispatch
+      // is still an "outbound attempt" the dispatcher may need to emit
+      // a message.failed event for. externalId passthrough lands in
+      // Step 2; here it's always null.
+      try {
+        await recordOutboundMessage(prisma, {
+          userId: auth.userId,
+          source: "TRIGGER",
+          phone: normalizedPhone,
+          whatsappMsgId: null,
+          externalId,
+          status: "failed",
+          errorMessage: errMsg,
+        });
+      } catch {
+        /* non-fatal */
+      }
       return errorResponse(
         errMsg,
         400,
@@ -509,6 +575,21 @@ export async function POST(request: NextRequest) {
       whatsappMsgId: result.messageId,
       responseTimeMs: Date.now() - startTime,
     });
+    // Unified ledger entry for the successful dispatch. externalId
+    // lands on OutboundMessage.externalId so Step 4's dispatcher can
+    // echo it back in every outbound event tied to this wamid.
+    try {
+      await recordOutboundMessage(prisma, {
+        userId: auth.userId,
+        source: "TRIGGER",
+        phone: normalizedPhone,
+        whatsappMsgId: result.messageId ?? null,
+        externalId,
+        status: "sent",
+      });
+    } catch {
+      /* non-fatal */
+    }
 
     return NextResponse.json(
       {

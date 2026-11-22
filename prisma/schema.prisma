@@ -122,6 +122,8 @@ model User {
   contactImports     ContactImport[]
   suppressionLogs    SuppressionLog[]
   doNotContacts      DoNotContact[]
+  outboundMessages   OutboundMessage[]
+  webhookEndpoints   WebhookEndpoint[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -153,6 +155,7 @@ model Campaign {
   completedAt  DateTime?
   contacts     Contact[]
   suppressionLogs SuppressionLog[]
+  outboundMessages OutboundMessage[]
 
   // Post-campaign analysis: set when the alert engine has run for
   // this campaign. Idempotency guard — analysis runs at most once.
@@ -894,4 +897,154 @@ model DoNotContact {
 
   @@unique([userId, phoneNumber])
   @@index([userId])
+}
+
+// ── Outbound-webhook event-emission layer ──────────────────────────────
+// Three tables that back the outbound event bus. Shipped as part of the
+// GHL / developer-webhook integration. See lib/webhookDispatcher.ts and
+// /settings/webhooks for how they're used.
+//
+// Separation of concerns vs. the two existing look-alikes:
+//   - WebhookLog (further up) logs INCOMING api-key requests that hit
+//     /api/webhooks/trigger. Unrelated to this subsystem.
+//   - OutboundReply (further up) persists inbox replies for the inbox
+//     UI. We keep writing it — the UI reads from it — but ALSO mirror
+//     a source="REPLY" row into OutboundMessage in the same transaction
+//     so the dispatcher has one unified read model.
+
+// Unified record of every WhatsApp message SwiftReach has dispatched
+// outward (campaign / trigger / single-send / reply). Written on dispatch,
+// updated on Meta status callbacks. Dispatcher reads from this table —
+// it's the single source of truth for outbound events.
+model OutboundMessage {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Meta's wamid. UNIQUE so status callbacks land via a simple keyed
+  // update with no ambiguity. Nullable because a send can fail BEFORE
+  // Meta returns a wamid (network error, invalid-phone 400, auth
+  // failure) — we still want the audit row for failed=true state.
+  // Postgres treats NULL as distinct in unique indices, so failed-
+  // pre-wamid rows don't collide with each other.
+  whatsappMsgId String?  @unique
+
+  // Where the send came from. Enum-like string rather than Prisma
+  // enum because we may add more sources (e.g. "AUTOMATION") without
+  // a migration.
+  source        String   // CAMPAIGN | TRIGGER | SINGLE | REPLY | AUTOMATION
+
+  phone         String   // E.164, no leading +
+
+  // Optional back-link to the triggering Campaign. onDelete:SetNull
+  // because deleting a campaign shouldn't erase our audit of who we
+  // tried to message.
+  campaignId    String?
+  campaign      Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  // Caller-supplied idempotency/correlation key for Step 2. Stored
+  // verbatim; indexed so a webhook subscriber can look up the
+  // dispatched message by its own id.
+  externalId    String?
+
+  status        String   @default("sent") // sent | delivered | read | failed
+  // sentAt comes from the dispatch site (clock on whichever server
+  // handled the send). deliveredAt / readAt / failedAt come from
+  // META'S TIMESTAMP in the status callback (see hardening step),
+  // so these fields reflect what Meta observed, not what our clock
+  // saw when we processed the callback.
+  sentAt        DateTime @default(now())
+  deliveredAt   DateTime?
+  readAt        DateTime?
+  failedAt      DateTime?
+  errorMessage  String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([userId, campaignId])
+  @@index([externalId])
+}
+
+// A webhook destination the user has registered. The user receives
+// signed POSTs at `url` for every event in `events` they've subscribed
+// to. Multiple endpoints per user allowed (different filters, or test
+// vs prod destinations).
+model WebhookEndpoint {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Where we POST. Validated as https:// at the API layer before save.
+  url          String
+  // Per-endpoint shared secret. Generated server-side (crypto.randomBytes),
+  // used as the HMAC key for X-SwiftReach-Signature. Rotated via the
+  // Settings UI — old secret stays valid until the next successful
+  // rotation to avoid breaking in-flight retries.
+  secret       String
+  // Event-type allow-list. Dispatcher sends to this endpoint only when
+  // the emitted event's type is in this array. Postgres String[] native.
+  events       String[]
+  // Soft-disable toggle. User can pause an endpoint, or the dispatcher
+  // flips it off after N consecutive endpoint-wide failures — see
+  // failureCount below.
+  active       Boolean  @default(true)
+  // Rolling count of consecutive delivery failures across all events
+  // to this endpoint. Reset to 0 on the next successful delivery. When
+  // it exceeds the dispatcher's threshold the endpoint is auto-paused
+  // and the owner is emailed.
+  failureCount Int      @default(0)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  deliveries   WebhookDelivery[]
+
+  @@index([userId, active])
+}
+
+// One row per (event, endpoint) dispatch attempt. PENDING rows get
+// retried by /api/cron/webhook-retry on exponential backoff; FAILED
+// rows are those that have been retried but not yet DEAD; DEAD is the
+// terminal state after the retry budget is spent.
+model WebhookDelivery {
+  id               String   @id @default(cuid())
+  // Deterministic event id so Meta's own status retries don't mint
+  // duplicate rows. Derived via uuidv5(namespace, `${wamid}|${status}|
+  // ${endpointId}`) for Meta-sourced events, or similar stable tuple
+  // for opt-outs/replies. UNIQUE so the dispatcher's createMany-like
+  // insert is naturally idempotent: a Meta retry hits the index and
+  // no-ops rather than generating a second delivery to the GHL endpoint.
+  eventId          String   @unique
+  endpointId       String
+  endpoint         WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  // One of: message.sent | message.delivered | message.read |
+  // message.failed | message.replied | contact.opted_out
+  eventType        String
+  // The exact JSON body POSTed to the endpoint. Stored so we can
+  // replay or show a delivery-log entry in the UI without rebuilding
+  // from source data that may have changed since.
+  payload          Json
+
+  attempts         Int      @default(0)
+  // When the retry worker should next pick this up. Set to now() on
+  // insert so the inline-first-attempt path can still run; updated
+  // on each failure per the exponential backoff schedule.
+  nextAttemptAt    DateTime @default(now())
+  // PENDING: never attempted or waiting for backoff
+  // DELIVERED: 2xx response within timeout — terminal
+  // FAILED: attempted at least once, under the retry budget
+  // DEAD: budget spent, give up — terminal
+  status           String   @default("PENDING")
+  lastResponseCode Int?
+  lastError        String?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // The retry worker's hot query: pending/failed where due.
+  @@index([status, nextAttemptAt])
+  @@index([endpointId, createdAt])
 }

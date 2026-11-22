@@ -15,10 +15,14 @@
 // up.
 
 import { NextRequest, NextResponse } from "next/server";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/prisma";
 import { logError } from "@/lib/errorLog";
 import { detectOptOutKeyword, processOptOut } from "@/lib/optOut";
 import { normalizePhone } from "@/lib/phoneUtils";
+import { emitEvent } from "@/lib/webhookDispatcher";
+import type { WebhookEventType } from "@/lib/webhookEvents";
 
 export const dynamic = "force-dynamic";
 
@@ -80,14 +84,102 @@ export async function GET(
   return new Response("Forbidden", { status: 403 });
 }
 
+// ── Signature verification helper ───────────────────────────────────────
+// Meta signs every webhook POST with HMAC-SHA256 over the raw request
+// body, keyed on the Meta App Secret. The header shape is:
+//   X-Hub-Signature-256: sha256=<lowercase hex>
+//
+// Two modes depending on env state:
+//   enforce (META_APP_SECRET set): bad signature → reject 401
+//   log-only (secret missing): log the miss, allow the request through
+//
+// Log-only is a bootstrap concession so a misconfigured env can't
+// blackhole real Meta traffic the moment this deploys. The outbound
+// webhook dispatcher (Step 4+) refuses to ship while log-only mode
+// is in effect — that gate lives in lib/webhookDispatcher.ts so a
+// mistake here can't quietly forward forged payloads downstream.
+function verifyMetaSignature(
+  rawBody: string,
+  signatureHeader: string | null
+): "ok" | "missing-secret" | "invalid" {
+  const secret = process.env.META_APP_SECRET?.trim();
+  if (!secret) return "missing-secret";
+
+  // Meta sends "sha256=<hex>". Reject anything else outright — there's
+  // no legitimate case for a malformed header.
+  if (!signatureHeader || !signatureHeader.startsWith("sha256=")) {
+    return "invalid";
+  }
+  const providedHex = signatureHeader.slice("sha256=".length);
+  const expectedHex = createHmac("sha256", secret).update(rawBody).digest("hex");
+  if (providedHex.length !== expectedHex.length) return "invalid";
+
+  // timingSafeEqual requires equal-length buffers (checked above).
+  const ok = timingSafeEqual(
+    Buffer.from(providedHex, "hex"),
+    Buffer.from(expectedHex, "hex")
+  );
+  return ok ? "ok" : "invalid";
+}
+
+// ── Status ordering for monotonicity guard ─────────────────────────────
+// Meta can deliver status callbacks out of order (observed in practice:
+// read before delivered, delivered after read, multiple deliveries of
+// the same sent). We only ever advance state forward:
+//   sent → delivered → read
+// Failed is terminal in a separate axis — once a row is failed, no
+// non-failed status can overwrite it. These rules apply to BOTH the
+// Contact and OutboundMessage status column.
+const STATUS_PRIORITY: Record<string, number> = {
+  sent: 1,
+  delivered: 2,
+  read: 3,
+  failed: 4,
+};
+function priorStatusesThatCanAdvanceTo(target: string): string[] {
+  const p = STATUS_PRIORITY[target] ?? 0;
+  return Object.entries(STATUS_PRIORITY)
+    .filter(([, v]) => v < p)
+    .map(([k]) => k);
+}
+
 // ── POST — delivery / read / fail status callbacks + inbound messages ────────
 export async function POST(
   req: NextRequest,
   { params }: { params: { userId: string } }
 ) {
+  // Consume the body as text FIRST — req.json() would consume the
+  // stream and we couldn't HMAC it afterward.
+  const rawBody = await req.text();
+
+  // Signature check. If missing or invalid under enforce mode we 401
+  // and never parse the body, so an attacker can't trigger side
+  // effects by sending plausible JSON with a bogus signature.
+  const sigResult = verifyMetaSignature(
+    rawBody,
+    req.headers.get("x-hub-signature-256")
+  );
+  if (sigResult === "invalid") {
+    await logError(
+      "POST /api/webhook/[userId]",
+      new Error("Meta webhook: invalid X-Hub-Signature-256 — payload rejected"),
+      { userId: params.userId, severity: "warning" }
+    );
+    return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 401 });
+  }
+  if (sigResult === "missing-secret") {
+    // Log-only mode. Do NOT reject. Dispatcher gate in Step 4 blocks
+    // outbound forwarding while this mode is active.
+    await logError(
+      "POST /api/webhook/[userId]",
+      new Error("META_APP_SECRET not set — webhook running in log-only mode"),
+      { userId: params.userId, severity: "warning" }
+    );
+  }
+
   let body: WebhookPayload;
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody) as WebhookPayload;
   } catch {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
@@ -101,27 +193,132 @@ export async function POST(
     }
   }
 
+  // Accumulated outbound-webhook emits. Filled by the status + inbound
+  // loops below; flushed via waitUntil() at the bottom so Meta still
+  // gets its fast 200 while each subscriber endpoint gets its POST
+  // in the background. A failed emit is logged inside emitEvent — we
+  // never rethrow here, since the DB writes for the status have
+  // already committed and Meta would retry on a non-200.
+  const pendingEmits: Array<() => Promise<void>> = [];
+
   // ── Status updates ──────────────────────────────────────────────────────
   for (const s of statuses) {
     try {
+      // Meta's timestamp is unix seconds as a string. Fall back to
+      // server now() only if Meta omitted it (shouldn't happen on
+      // real callbacks). Using Meta's time means readAt reflects when
+      // the user actually opened, not when our cron got around to
+      // processing it.
+      const metaTs = s.timestamp
+        ? new Date(Number(s.timestamp) * 1000)
+        : new Date();
+
       const updates: Record<string, unknown> = { status: s.status };
-      if (s.status === "delivered") updates.deliveredAt = new Date();
-      if (s.status === "read") {
-        updates.deliveredAt = updates.deliveredAt ?? new Date();
-        updates.readAt = new Date();
+      if (s.status === "delivered") {
+        updates.deliveredAt = metaTs;
+      } else if (s.status === "read") {
+        updates.readAt = metaTs;
+        // Fill deliveredAt only if currently null — Meta usually sends
+        // delivered + read in order, but if the sequence was observed
+        // in reverse we want deliveredAt = Meta's own delivered-time,
+        // not the read-time. Prisma's `update.where` plus setting via
+        // raw null-coalescing isn't possible, so we pass readAt only;
+        // deliveredAt backfill is handled below via a second update
+        // scoped to rows that still have it null.
+      } else if (s.status === "failed") {
+        updates.failedAt = metaTs;
+        if (s.errors?.[0]) {
+          updates.errorMessage = `[${s.errors[0].code}] ${s.errors[0].title}${
+            s.errors[0].message ? ` — ${s.errors[0].message}` : ""
+          }`;
+        }
       }
-      if (s.status === "failed" && s.errors?.[0]) {
-        updates.errorMessage = `[${s.errors[0].code}] ${s.errors[0].title}${
-          s.errors[0].message ? ` — ${s.errors[0].message}` : ""
-        }`;
-      }
+
+      // Monotonicity: only apply when the current status is strictly
+      // lower-priority than the incoming one. A late "delivered"
+      // arriving after "read" finds no matching rows and silently
+      // no-ops — which is the whole point.
+      const allowedPriors = priorStatusesThatCanAdvanceTo(s.status);
+      if (allowedPriors.length === 0) continue; // "sent" or unknown — nothing to advance
+
+      // Update the historical Contact row (campaign send ledger).
       await prisma.contact.updateMany({
         where: {
           whatsappMsgId: s.id,
+          status: { in: allowedPriors },
           campaign: { userId: params.userId },
         },
         data: updates,
       });
+
+      // Mirror into OutboundMessage (unified cross-source ledger that
+      // the dispatcher reads from). Scoped on userId too so a forged
+      // wamid guess can't update another user's row.
+      await prisma.outboundMessage.updateMany({
+        where: {
+          whatsappMsgId: s.id,
+          userId: params.userId,
+          status: { in: allowedPriors },
+        },
+        data: updates,
+      });
+
+      // deliveredAt backfill on read — only touches rows where
+      // deliveredAt is still null (i.e. we skipped straight from sent
+      // to read). Done as a separate updateMany so we don't clobber
+      // a prior valid deliveredAt Meta gave us.
+      if (s.status === "read") {
+        await prisma.contact.updateMany({
+          where: {
+            whatsappMsgId: s.id,
+            deliveredAt: null,
+            campaign: { userId: params.userId },
+          },
+          data: { deliveredAt: metaTs },
+        });
+        await prisma.outboundMessage.updateMany({
+          where: {
+            whatsappMsgId: s.id,
+            userId: params.userId,
+            deliveredAt: null,
+          },
+          data: { deliveredAt: metaTs },
+        });
+      }
+
+      // Queue a message.* emit for subscribers. Look up the matching
+      // OutboundMessage row for the per-event payload fields (phone,
+      // campaignId, externalId). If no OutboundMessage exists (pre-
+      // Step-1 message, or a wamid we never recorded), skip the emit
+      // — we can't fill the payload meaningfully, and the DB updates
+      // we just made to Contact still land in the UI regardless.
+      const om = await prisma.outboundMessage.findUnique({
+        where: { whatsappMsgId: s.id },
+        select: {
+          userId: true,
+          phone: true,
+          campaignId: true,
+          externalId: true,
+        },
+      });
+      if (om && om.userId === params.userId) {
+        const emitType = `message.${s.status}` as WebhookEventType;
+        pendingEmits.push(() =>
+          emitEvent(prisma, {
+            userId: om.userId,
+            eventType: emitType,
+            // sourceKey tied to status so sent / delivered / read /
+            // failed each get their own eventId.
+            sourceKey: `${s.id}|${s.status}`,
+            messageId: s.id,
+            phone: om.phone,
+            campaignId: om.campaignId,
+            externalId: om.externalId,
+            status: s.status,
+            timestamp: metaTs,
+          })
+        );
+      }
     } catch (err) {
       // Log but continue — one bad status shouldn't drop the rest of the batch.
       await logError("POST /api/webhook/[userId]", err, {
@@ -141,7 +338,22 @@ export async function POST(
 
       const keyword = detectOptOutKeyword(text);
       if (keyword) {
-        await processOptOut(params.userId, phone, keyword, "whatsapp");
+        const optOut = await processOptOut(params.userId, phone, keyword, "whatsapp");
+        // Queue the contact.opted_out event. sourceKey = OptOutLog.id
+        // which is unique per opt-out event — Meta can't cause a dup
+        // because each STOP produces one new OptOutLog row.
+        pendingEmits.push(() =>
+          emitEvent(prisma, {
+            userId: params.userId,
+            eventType: "contact.opted_out",
+            sourceKey: optOut.optOutLogId,
+            phone: optOut.phoneNumber,
+            campaignId: optOut.campaignId,
+            timestamp: m.timestamp
+              ? new Date(Number(m.timestamp) * 1000)
+              : new Date(),
+          })
+        );
         // Opt-outs do NOT land in the inbox — they're a system signal,
         // not a conversation. /admin → opt-out logs is the audit trail.
         continue;
@@ -184,7 +396,7 @@ export async function POST(
         select: { campaignId: true },
       });
 
-      await prisma.inboundMessage.create({
+      const inboxRow = await prisma.inboundMessage.create({
         data: {
           userId: params.userId,
           fromPhone: phone,
@@ -193,12 +405,44 @@ export async function POST(
           messageId: m.id ?? null,
           campaignId: lastContact?.campaignId ?? null,
         },
+        select: { id: true },
       });
+
+      // Queue message.replied. sourceKey = InboundMessage.id, which is
+      // unique per inbound row — Meta can't dupe because we always
+      // create a new row for each delivered inbound event (Meta dedups
+      // on its own side before calling us). reply_text carried in the
+      // event payload so subscribers don't have to re-fetch.
+      pendingEmits.push(() =>
+        emitEvent(prisma, {
+          userId: params.userId,
+          eventType: "message.replied",
+          sourceKey: inboxRow.id,
+          phone,
+          campaignId: lastContact?.campaignId ?? null,
+          replyText: text,
+          timestamp: m.timestamp
+            ? new Date(Number(m.timestamp) * 1000)
+            : new Date(),
+        })
+      );
     } catch (err) {
       await logError("POST /api/webhook/[userId] inbound", err, {
         userId: params.userId,
       });
     }
+  }
+
+  // Flush pending webhook emits AFTER the 200. waitUntil keeps the
+  // function alive on Vercel until these resolve, but Meta sees our
+  // response immediately — exactly the "fast 200, work after" pattern
+  // the spec called out. Errors inside the emits are swallowed by
+  // emitEvent itself (logged, not thrown); allSettled is a belt in
+  // case we ever reintroduce a path that can throw synchronously.
+  if (pendingEmits.length > 0) {
+    waitUntil(
+      Promise.allSettled(pendingEmits.map((fn) => fn())).then(() => undefined)
+    );
   }
 
   // Always 200 — Meta retries on non-2xx forever.

@@ -21,6 +21,7 @@
     "@react-pdf/renderer": "^4.9.0",
     "@stripe/stripe-js": "^9.4.0",
     "@vercel/blob": "^2.8.0",
+    "@vercel/functions": "^3.11.3",
     "axios": "^1.7.7",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.0",
