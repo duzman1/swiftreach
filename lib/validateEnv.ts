@@ -35,6 +35,18 @@ const requiredEnvVars: RequiredEnv[] = [
     setupLink: "See SETUP.md",
   },
   {
+    key: "META_APP_SECRET",
+    // Required because the Meta inbound webhook verifies every POST's
+    // X-Hub-Signature-256 against this. Without it, the webhook route
+    // falls into log-only mode, and the outbound dispatcher refuses
+    // to forward events until this is set. It's also already used by
+    // the embedded-signup token exchange, so prod has always had it.
+    description:
+      "Meta App Secret — signs WhatsApp webhook payloads and OAuth exchanges",
+    setupLink:
+      "Meta App Dashboard → App Settings → Basic → App Secret",
+  },
+  {
     key: "NEXT_PUBLIC_BASE_URL",
     description: "Public app URL (Vercel URL or ngrok tunnel)",
     setupLink: "e.g. https://your-app.vercel.app",

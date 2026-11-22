@@ -15,6 +15,7 @@ import { decrypt } from "@/lib/encrypt";
 import { handleApiError } from "@/lib/apiResponse";
 import { prisma } from "@/lib/prisma";
 import { checkSuppression } from "@/lib/checkSuppression";
+import { recordOutboundMessage } from "@/lib/outboundMessage";
 
 export const dynamic = "force-dynamic";
 
@@ -133,6 +134,20 @@ export async function POST(req: NextRequest) {
       const result = await sendWithRetry(() =>
         sendTextMessage(phone, text, creds)
       );
+      // Unified outbound ledger. Non-fatal — a record failure must
+      // not change the response the client receives.
+      try {
+        await recordOutboundMessage(prisma, {
+          userId: user.id,
+          source: "SINGLE",
+          phone,
+          whatsappMsgId: result.messageId ?? null,
+          status: result.success ? "sent" : "failed",
+          errorMessage: result.success ? null : (result.error?.message ?? null),
+        });
+      } catch {
+        /* non-fatal */
+      }
       return NextResponse.json({
         ok: result.success,
         messageId: result.messageId,
@@ -159,6 +174,18 @@ export async function POST(req: NextRequest) {
         creds
       )
     );
+    try {
+      await recordOutboundMessage(prisma, {
+        userId: user.id,
+        source: "SINGLE",
+        phone,
+        whatsappMsgId: result.messageId ?? null,
+        status: result.success ? "sent" : "failed",
+        errorMessage: result.success ? null : (result.error?.message ?? null),
+      });
+    } catch {
+      /* non-fatal */
+    }
     return NextResponse.json({
       ok: result.success,
       messageId: result.messageId,

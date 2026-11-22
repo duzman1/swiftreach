@@ -19,6 +19,7 @@ import {
   classifySuppressions,
   logSuppressed,
 } from "@/lib/checkSuppression";
+import { recordOutboundMessage } from "@/lib/outboundMessage";
 
 export const dynamic = "force-dynamic";
 // Vercel Pro caps function maxDuration at 900s. The send loop checks
@@ -319,6 +320,24 @@ export async function GET(
               sentAt: nextStatus === "sent" ? new Date() : null,
             },
           });
+
+          // Mirror into OutboundMessage — the unified send ledger the
+          // outbound-webhook dispatcher reads from. Best-effort: a
+          // failure here must never break the campaign loop (the
+          // Contact row above is already the user-visible truth).
+          try {
+            await recordOutboundMessage(prisma, {
+              userId: userIdLocal,
+              source: "CAMPAIGN",
+              phone: c.phoneNumber,
+              whatsappMsgId: messageId ?? null,
+              campaignId,
+              status: nextStatus === "sent" ? "sent" : "failed",
+              errorMessage: errorMsg ?? null,
+            });
+          } catch {
+            /* non-fatal */
+          }
 
           if (nextStatus === "sent") {
             sentCount++;

@@ -31,6 +31,7 @@ import {
   type SendError,
 } from "@/lib/whatsapp";
 import { checkSuppression } from "@/lib/checkSuppression";
+import { recordOutboundMessage } from "@/lib/outboundMessage";
 
 export const dynamic = "force-dynamic";
 
@@ -489,6 +490,22 @@ export async function POST(request: NextRequest) {
         errorMessage: errMsg,
         responseTimeMs: Date.now() - startTime,
       });
+      // Also record in the unified outbound ledger — a failed dispatch
+      // is still an "outbound attempt" the dispatcher may need to emit
+      // a message.failed event for. externalId passthrough lands in
+      // Step 2; here it's always null.
+      try {
+        await recordOutboundMessage(prisma, {
+          userId: auth.userId,
+          source: "TRIGGER",
+          phone: normalizedPhone,
+          whatsappMsgId: null,
+          status: "failed",
+          errorMessage: errMsg,
+        });
+      } catch {
+        /* non-fatal */
+      }
       return errorResponse(
         errMsg,
         400,
@@ -509,6 +526,18 @@ export async function POST(request: NextRequest) {
       whatsappMsgId: result.messageId,
       responseTimeMs: Date.now() - startTime,
     });
+    // Unified ledger entry for the successful dispatch.
+    try {
+      await recordOutboundMessage(prisma, {
+        userId: auth.userId,
+        source: "TRIGGER",
+        phone: normalizedPhone,
+        whatsappMsgId: result.messageId ?? null,
+        status: "sent",
+      });
+    } catch {
+      /* non-fatal */
+    }
 
     return NextResponse.json(
       {
