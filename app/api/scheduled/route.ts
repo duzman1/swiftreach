@@ -13,7 +13,7 @@ import { handleApiError } from "@/lib/apiResponse";
 import { isUserSuspended, suspendedResponse } from "@/lib/suspendCheck";
 import { requirePaidPlan } from "@/lib/planGate";
 import { hasFeature } from "@/lib/plans";
-import type { VariableMapping } from "@/lib/whatsapp";
+import { validateHeaderMedia, type VariableMapping } from "@/lib/whatsapp";
 import type { FormatRule } from "@/lib/buildMessage";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,9 @@ interface CreateScheduledBody {
   recurring?: boolean;
   recurrence?: "daily" | "weekly" | "monthly" | null;
   recurrenceDay?: number | null;
+  // Template media header. Mirrored into the Campaign row at fire
+  // time by materializeScheduledCampaign.
+  headerMedia?: unknown;
 }
 
 function bad(message: string, status = 400) {
@@ -150,6 +153,10 @@ export async function POST(req: NextRequest) {
       return bad("Recurring campaigns require a recurrence (daily | weekly | monthly)");
     }
 
+    const hmCheck = validateHeaderMedia(body.headerMedia);
+    if (!hmCheck.ok) return bad(hmCheck.error);
+    const headerMediaJson = hmCheck.value ? JSON.stringify(hmCheck.value) : null;
+
     const created = await prisma.scheduledCampaign.create({
       data: {
         userId,
@@ -160,6 +167,7 @@ export async function POST(req: NextRequest) {
         staticVars: JSON.stringify(body.staticVars ?? {}),
         variableMap: JSON.stringify(body.variableMap ?? []),
         formatRules: JSON.stringify(body.formatRules ?? {}),
+        headerMedia: headerMediaJson,
         phoneColumn,
         delayMs: Math.max(500, Math.min(60000, body.delayMs ?? 2000)),
         // Audience path stores []; the materialiser fork keys off

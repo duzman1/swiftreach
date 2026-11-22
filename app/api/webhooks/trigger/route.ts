@@ -26,6 +26,7 @@ import {
   sendTextMessage,
   sendTemplateMessage,
   buildTemplateComponents,
+  validateHeaderMedia,
   DEFAULT_API_VERSION,
   type WhatsAppCredentials,
   type SendError,
@@ -49,6 +50,10 @@ interface TriggerBody {
   // delivered / read / failed) so an integration can tie the event to
   // its own record without needing to track wamids. Fully optional.
   external_id?: string;
+  // Optional media header for templates that declare one. Ignored for
+  // freeform sends (no Meta template component to attach to).
+  // Shape: { type: "image"|"video"|"document", link, filename? }
+  header_media?: unknown;
 }
 
 // Validation cap on external_id. Matches most downstream systems'
@@ -268,6 +273,15 @@ export async function POST(request: NextRequest) {
     }
     const externalId = extIdResult.value;
 
+    // Validate header_media up front too. Null when omitted; when
+    // present, it's a {type, link, filename?} object that will be
+    // prepended as a Meta header component in the template send below.
+    const headerMediaResult = validateHeaderMedia(body.header_media);
+    if (!headerMediaResult.ok) {
+      return errorResponse(headerMediaResult.error, 400);
+    }
+    const headerMediaValue = headerMediaResult.value;
+
     // Step 1 — authenticate.
     try {
       auth = await authenticateApiKey(request, body);
@@ -483,7 +497,7 @@ export async function POST(request: NextRequest) {
         creds
       );
     } else {
-      const components = buildTemplateComponentsFromVariables(variables);
+      const components = buildTemplateComponentsFromVariables(variables, headerMediaValue);
       // eslint-disable-next-line no-console
       console.log(
         "TEMPLATE DEBUG:",
@@ -638,9 +652,34 @@ export async function POST(request: NextRequest) {
 // insertion order). buildTemplateComponents from lib/whatsapp.ts
 // expects a VariableMapping[] which is tied to the wizard's column-
 // mapping flow — for the API we just construct text params directly.
+//
+// headerMedia is optional; when present a type:"header" component is
+// prepended with the correct image/video/document wrapper object so
+// Meta accepts templates that declare a media header.
 function buildTemplateComponentsFromVariables(
-  variables: Record<string, string>
+  variables: Record<string, string>,
+  headerMedia?: import("@/lib/whatsapp").HeaderMedia | null
 ): import("@/lib/whatsapp").TemplateComponent[] {
+  const components: import("@/lib/whatsapp").TemplateComponent[] = [];
+
+  if (headerMedia && headerMedia.link) {
+    let param: import("@/lib/whatsapp").TemplateParameter;
+    if (headerMedia.type === "image") {
+      param = { type: "image", image: { link: headerMedia.link } };
+    } else if (headerMedia.type === "video") {
+      param = { type: "video", video: { link: headerMedia.link } };
+    } else {
+      param = {
+        type: "document",
+        document: {
+          link: headerMedia.link,
+          ...(headerMedia.filename ? { filename: headerMedia.filename } : {}),
+        },
+      };
+    }
+    components.push({ type: "header", parameters: [param] });
+  }
+
   const positional = Object.entries(variables)
     .filter(([k]) => /^\d+$/.test(k))
     .sort(([a], [b]) => Number(a) - Number(b))
@@ -651,13 +690,14 @@ function buildTemplateComponentsFromVariables(
       ? positional
       : Object.values(variables).map((v) => String(v));
 
-  if (ordered.length === 0) return [];
-  return [
-    {
+  if (ordered.length > 0) {
+    components.push({
       type: "body",
       parameters: ordered.map((text) => ({ type: "text" as const, text })),
-    },
-  ];
+    });
+  }
+
+  return components;
 }
 
 // Suppress unused-import warning — buildTemplateComponents is referenced

@@ -135,6 +135,7 @@ export default function DevelopersPage() {
               ["language", "string", "optional", "Template language code. Defaults to en_US."],
               ["api_key", "string", "optional", "Alternative to Authorization header."],
               ["external_id", "string", "optional", "Your own id for this message (max 128 chars). Stored on the message and echoed back in every delivery/read/failed webhook event for easy correlation."],
+              ["header_media", "object", "optional", "For templates that declare a media header. Shape: { type: \"image\" | \"video\" | \"document\", link: \"https://...\", filename?: \"brochure.pdf\" }. Public https URL (max 2048 chars). filename is accepted only for document and max 240 chars. Ignored for freeform sends."],
             ]}
           />
 
@@ -200,6 +201,35 @@ export default function DevelopersPage() {
             read / failed webhook tied to this message. Lets your
             integration match outbound events to your own records without
             tracking WhatsApp wamids.
+          </p>
+
+          <p className="text-sm text-zinc-700 mt-6 mb-2">
+            Template with a media header (image / video / document):
+          </p>
+          <CodeBlock label="cURL">{`curl -X POST https://www.swiftreach.app/api/webhooks/trigger \\
+  -H "Authorization: Bearer sr_live_abc123..." \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "phone": "+13103459139",
+    "template": "memorial_mass_reminder_date",
+    "language": "en",
+    "variables": {
+      "1": "John Agada",
+      "2": "Sunday, December 7, 2026"
+    },
+    "header_media": {
+      "type": "image",
+      "link": "https://cdn.example.com/memorial-card.jpg"
+    }
+  }'`}</CodeBlock>
+          <p className="text-xs text-muted-foreground mt-2">
+            Required whenever the Meta template declares a header with
+            image, video, or document content. Use{" "}
+            <code className="bg-zinc-100 px-1 rounded">type: &quot;document&quot;</code>{" "}
+            for PDFs and add an optional{" "}
+            <code className="bg-zinc-100 px-1 rounded">filename</code> so
+            recipients see a friendly name instead of the URL. Omit for
+            text-only templates.
           </p>
         </Section>
 

@@ -21,11 +21,32 @@ export interface SendResult {
   error?: SendError;
 }
 
+// Meta's template-component parameter shape covers several kinds.
+// Text is still the common body-variable case; the three media
+// variants wrap the URL in a type-specific object as Meta's API
+// requires. Everything optional on the union lives at the top level
+// so TS narrowing on `type` gives the right suggestion.
+export type TemplateParameter =
+  | { type: "text"; text: string }
+  | { type: "image"; image: { link: string } }
+  | { type: "video"; video: { link: string } }
+  | { type: "document"; document: { link: string; filename?: string } };
+
 export interface TemplateComponent {
   type: "header" | "body" | "footer" | "button";
-  parameters?: Array<{ type: "text"; text: string }>;
+  parameters?: TemplateParameter[];
   sub_type?: string;
   index?: number;
+}
+
+// Campaign-level media header config. One header per campaign — same
+// media sent to every contact. Image/video require just link;
+// document additionally accepts a filename Meta shows on the receiver.
+export type HeaderMediaType = "image" | "video" | "document";
+export interface HeaderMedia {
+  type: HeaderMediaType;
+  link: string;      // https:// URL; validated at the API boundary
+  filename?: string; // only used for type:"document"
 }
 
 /**
@@ -236,27 +257,115 @@ export interface VariableMapping {
 export function buildTemplateComponents(
   variableMap: VariableMapping[],
   rowData: Record<string, string>,
-  staticVars: Record<string, string> = {}
+  staticVars: Record<string, string> = {},
+  headerMedia?: HeaderMedia | null
 ): TemplateComponent[] {
-  if (variableMap.length === 0) return [];
-  // Sort by metaVar number so {{1}} lands first, {{2}} second, etc.
-  const ordered = [...variableMap].sort(
-    (a, b) => Number(a.metaVar) - Number(b.metaVar)
-  );
-  const parameters = ordered.map((m) => {
-    let text = "";
-    if (m.source === "column" && m.column) {
-      text = rowData[m.column] ?? "";
-    } else if (m.source === "static") {
-      text = m.value ?? "";
+  const components: TemplateComponent[] = [];
+
+  // Header component if the template declares one. Media wrap shape
+  // follows Meta's API exactly — see
+  // developers.facebook.com/docs/whatsapp/cloud-api/reference/messages
+  // under "message template object → header parameters". Document
+  // supports an optional filename field; image + video do not.
+  if (headerMedia && headerMedia.link) {
+    let param: TemplateParameter;
+    if (headerMedia.type === "image") {
+      param = { type: "image", image: { link: headerMedia.link } };
+    } else if (headerMedia.type === "video") {
+      param = { type: "video", video: { link: headerMedia.link } };
+    } else {
+      param = {
+        type: "document",
+        document: {
+          link: headerMedia.link,
+          ...(headerMedia.filename ? { filename: headerMedia.filename } : {}),
+        },
+      };
     }
-    // staticVars override (matches the spec's precedence)
-    if (m.column && rowData[m.column] === undefined && staticVars[m.column]) {
-      text = staticVars[m.column];
+    components.push({ type: "header", parameters: [param] });
+  }
+
+  if (variableMap.length > 0) {
+    // Sort by metaVar number so {{1}} lands first, {{2}} second, etc.
+    const ordered = [...variableMap].sort(
+      (a, b) => Number(a.metaVar) - Number(b.metaVar)
+    );
+    const parameters: TemplateParameter[] = ordered.map((m) => {
+      let text = "";
+      if (m.source === "column" && m.column) {
+        text = rowData[m.column] ?? "";
+      } else if (m.source === "static") {
+        text = m.value ?? "";
+      }
+      // staticVars override (matches the spec's precedence)
+      if (m.column && rowData[m.column] === undefined && staticVars[m.column]) {
+        text = staticVars[m.column];
+      }
+      return { type: "text" as const, text: text === "" ? " " : text };
+    });
+    components.push({ type: "body", parameters });
+  }
+
+  return components;
+}
+
+// ── Validate a user-supplied header media config ─────────────────────────
+// Used at every API boundary that accepts headerMedia — campaigns,
+// scheduled, single-send, trigger. Centralised so the rules stay in one
+// place. Returns the normalised object or an error string.
+export function validateHeaderMedia(
+  raw: unknown
+): { ok: true; value: HeaderMedia | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== "object") {
+    return { ok: false, error: "headerMedia must be an object" };
+  }
+  const r = raw as Record<string, unknown>;
+  const type = r.type;
+  if (type !== "image" && type !== "video" && type !== "document") {
+    return {
+      ok: false,
+      error: "headerMedia.type must be 'image', 'video', or 'document'",
+    };
+  }
+  if (typeof r.link !== "string" || r.link.trim().length === 0) {
+    return { ok: false, error: "headerMedia.link is required" };
+  }
+  const link = r.link.trim();
+  if (link.length > 2048) {
+    return { ok: false, error: "headerMedia.link is too long (max 2048)" };
+  }
+  try {
+    const u = new URL(link);
+    if (u.protocol !== "https:") {
+      return { ok: false, error: "headerMedia.link must use https://" };
     }
-    return { type: "text" as const, text: text === "" ? " " : text };
-  });
-  return [{ type: "body", parameters }];
+  } catch {
+    return { ok: false, error: "headerMedia.link is not a valid URL" };
+  }
+  let filename: string | undefined;
+  if (type === "document") {
+    if (r.filename !== undefined) {
+      if (typeof r.filename !== "string") {
+        return {
+          ok: false,
+          error: "headerMedia.filename must be a string",
+        };
+      }
+      const f = r.filename.trim();
+      if (f.length > 240) {
+        return {
+          ok: false,
+          error: "headerMedia.filename is too long (max 240)",
+        };
+      }
+      if (f.length > 0) filename = f;
+    }
+  }
+  return {
+    ok: true,
+    value: { type, link, ...(filename ? { filename } : {}) },
+  };
 }
 
 // ── Fetch info on the configured phone number — used for Test Connection ─────

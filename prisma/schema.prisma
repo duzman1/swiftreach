@@ -144,6 +144,12 @@ model Campaign {
   staticVars   String    @default("{}")
   variableMap  String    @default("[]")
   formatRules  String    @default("{}")
+  // Optional media header for template sends. Stored as JSON with
+  // shape { type: "image"|"video"|"document", link, filename? }.
+  // Null for freeform campaigns and template campaigns that don't
+  // use a header. One header per campaign — same media sent to every
+  // contact (the common memorial / announcement / receipt case).
+  headerMedia  String?
   phoneColumn  String
   delayMs      Int       @default(2000)
   status       String    @default("draft")
@@ -305,6 +311,9 @@ model ScheduledCampaign {
   staticVars      String  @default("{}")
   variableMap     String  @default("[]")
   formatRules     String  @default("{}")
+  // Mirror of Campaign.headerMedia — nullable JSON for template
+  // media headers. See Campaign for shape + semantics.
+  headerMedia     String?
   phoneColumn     String
   delayMs         Int     @default(2000)
   contactListData String  @default("[]") // JSON array of contact row objects (snapshot; used when audienceId is null)
