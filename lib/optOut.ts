@@ -90,12 +90,24 @@ export async function attributeOptOut(
  *
  * Idempotent — safe to call repeatedly for the same phone.
  */
+// Return shape carries the created OptOutLog id so a caller that
+// needs to emit a contact.opted_out webhook event (via the outbound
+// dispatcher) has a stable key to derive the deterministic eventId
+// from — and so the webhook route can SKIP emit when this call was
+// a no-op (contact was already opted out; no new OptOutLog row).
+// Callers that don't care about emission just ignore the return.
+export interface ProcessOptOutResult {
+  optOutLogId: string;
+  phoneNumber: string;
+  campaignId: string | null;
+}
+
 export async function processOptOut(
   userId: string,
   phoneNumber: string,
   keyword: string,
   source: "whatsapp" | "manual" = "whatsapp"
-): Promise<void> {
+): Promise<ProcessOptOutResult> {
   const now = new Date();
 
   // Upsert SavedContact: if they don't exist yet, create one with optedOut=true
@@ -175,6 +187,15 @@ export async function processOptOut(
       });
     }
   }
+
+  // Return the OptOutLog info so the caller (currently the Meta
+  // inbound webhook handler) can dispatch a contact.opted_out event
+  // keyed deterministically on optOutLog.id. See lib/webhookDispatcher.
+  return {
+    optOutLogId: optOutLog.id,
+    phoneNumber,
+    campaignId: attributed?.campaignId ?? null,
+  };
 }
 
 /**

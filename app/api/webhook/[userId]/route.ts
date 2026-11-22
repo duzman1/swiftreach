@@ -16,10 +16,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/prisma";
 import { logError } from "@/lib/errorLog";
 import { detectOptOutKeyword, processOptOut } from "@/lib/optOut";
 import { normalizePhone } from "@/lib/phoneUtils";
+import { emitEvent } from "@/lib/webhookDispatcher";
+import type { WebhookEventType } from "@/lib/webhookEvents";
 
 export const dynamic = "force-dynamic";
 
@@ -190,6 +193,14 @@ export async function POST(
     }
   }
 
+  // Accumulated outbound-webhook emits. Filled by the status + inbound
+  // loops below; flushed via waitUntil() at the bottom so Meta still
+  // gets its fast 200 while each subscriber endpoint gets its POST
+  // in the background. A failed emit is logged inside emitEvent — we
+  // never rethrow here, since the DB writes for the status have
+  // already committed and Meta would retry on a non-200.
+  const pendingEmits: Array<() => Promise<void>> = [];
+
   // ── Status updates ──────────────────────────────────────────────────────
   for (const s of statuses) {
     try {
@@ -274,6 +285,40 @@ export async function POST(
           data: { deliveredAt: metaTs },
         });
       }
+
+      // Queue a message.* emit for subscribers. Look up the matching
+      // OutboundMessage row for the per-event payload fields (phone,
+      // campaignId, externalId). If no OutboundMessage exists (pre-
+      // Step-1 message, or a wamid we never recorded), skip the emit
+      // — we can't fill the payload meaningfully, and the DB updates
+      // we just made to Contact still land in the UI regardless.
+      const om = await prisma.outboundMessage.findUnique({
+        where: { whatsappMsgId: s.id },
+        select: {
+          userId: true,
+          phone: true,
+          campaignId: true,
+          externalId: true,
+        },
+      });
+      if (om && om.userId === params.userId) {
+        const emitType = `message.${s.status}` as WebhookEventType;
+        pendingEmits.push(() =>
+          emitEvent(prisma, {
+            userId: om.userId,
+            eventType: emitType,
+            // sourceKey tied to status so sent / delivered / read /
+            // failed each get their own eventId.
+            sourceKey: `${s.id}|${s.status}`,
+            messageId: s.id,
+            phone: om.phone,
+            campaignId: om.campaignId,
+            externalId: om.externalId,
+            status: s.status,
+            timestamp: metaTs,
+          })
+        );
+      }
     } catch (err) {
       // Log but continue — one bad status shouldn't drop the rest of the batch.
       await logError("POST /api/webhook/[userId]", err, {
@@ -293,7 +338,22 @@ export async function POST(
 
       const keyword = detectOptOutKeyword(text);
       if (keyword) {
-        await processOptOut(params.userId, phone, keyword, "whatsapp");
+        const optOut = await processOptOut(params.userId, phone, keyword, "whatsapp");
+        // Queue the contact.opted_out event. sourceKey = OptOutLog.id
+        // which is unique per opt-out event — Meta can't cause a dup
+        // because each STOP produces one new OptOutLog row.
+        pendingEmits.push(() =>
+          emitEvent(prisma, {
+            userId: params.userId,
+            eventType: "contact.opted_out",
+            sourceKey: optOut.optOutLogId,
+            phone: optOut.phoneNumber,
+            campaignId: optOut.campaignId,
+            timestamp: m.timestamp
+              ? new Date(Number(m.timestamp) * 1000)
+              : new Date(),
+          })
+        );
         // Opt-outs do NOT land in the inbox — they're a system signal,
         // not a conversation. /admin → opt-out logs is the audit trail.
         continue;
@@ -336,7 +396,7 @@ export async function POST(
         select: { campaignId: true },
       });
 
-      await prisma.inboundMessage.create({
+      const inboxRow = await prisma.inboundMessage.create({
         data: {
           userId: params.userId,
           fromPhone: phone,
@@ -345,12 +405,44 @@ export async function POST(
           messageId: m.id ?? null,
           campaignId: lastContact?.campaignId ?? null,
         },
+        select: { id: true },
       });
+
+      // Queue message.replied. sourceKey = InboundMessage.id, which is
+      // unique per inbound row — Meta can't dupe because we always
+      // create a new row for each delivered inbound event (Meta dedups
+      // on its own side before calling us). reply_text carried in the
+      // event payload so subscribers don't have to re-fetch.
+      pendingEmits.push(() =>
+        emitEvent(prisma, {
+          userId: params.userId,
+          eventType: "message.replied",
+          sourceKey: inboxRow.id,
+          phone,
+          campaignId: lastContact?.campaignId ?? null,
+          replyText: text,
+          timestamp: m.timestamp
+            ? new Date(Number(m.timestamp) * 1000)
+            : new Date(),
+        })
+      );
     } catch (err) {
       await logError("POST /api/webhook/[userId] inbound", err, {
         userId: params.userId,
       });
     }
+  }
+
+  // Flush pending webhook emits AFTER the 200. waitUntil keeps the
+  // function alive on Vercel until these resolve, but Meta sees our
+  // response immediately — exactly the "fast 200, work after" pattern
+  // the spec called out. Errors inside the emits are swallowed by
+  // emitEvent itself (logged, not thrown); allSettled is a belt in
+  // case we ever reintroduce a path that can throw synchronously.
+  if (pendingEmits.length > 0) {
+    waitUntil(
+      Promise.allSettled(pendingEmits.map((fn) => fn())).then(() => undefined)
+    );
   }
 
   // Always 200 — Meta retries on non-2xx forever.

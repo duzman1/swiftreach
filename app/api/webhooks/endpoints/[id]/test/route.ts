@@ -15,10 +15,12 @@
 // can't flood the dispatcher queue.
 
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError, errorResponse } from "@/lib/apiResponse";
 import { computeEventId } from "@/lib/webhookEvents";
+import { dispatchDelivery } from "@/lib/webhookDispatcher";
 
 export const dynamic = "force-dynamic";
 
@@ -102,15 +104,22 @@ export async function POST(
       select: { id: true, eventId: true, status: true, createdAt: true },
     });
 
-    // Note: until Step 4's dispatcher ships, this row just sits in
-    // PENDING. Once the dispatcher lands, the inline attempt + the
-    // retry cron will pick it up on the next pass. The UI can poll
-    // /api/webhooks/deliveries to watch it move to DELIVERED/FAILED.
+    // Fire the inline delivery attempt via waitUntil so the test POST
+    // returns immediately; the UI can poll /api/webhooks/deliveries
+    // to watch the row transition to DELIVERED or FAILED. If the
+    // dispatcher gate is closed (log-only Meta mode), dispatchDelivery
+    // still runs — the gate only blocks NEW row creation from
+    // unverified Meta events, not delivery of an already-created row
+    // the user asked for.
+    waitUntil(
+      dispatchDelivery(prisma, delivery.id).catch(() => undefined)
+    );
+
     return NextResponse.json({
       ok: true,
       delivery,
       note:
-        "Test event queued. Watch the delivery log for the result — if the dispatcher hasn't been enabled yet, the row will stay PENDING until then.",
+        "Test event queued. Watch the delivery log — the row will move to DELIVERED or FAILED within a few seconds.",
     });
   } catch (err) {
     return handleApiError(err, "POST /api/webhooks/endpoints/[id]/test");
