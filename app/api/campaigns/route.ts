@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizePhone, isValidPhone } from "@/lib/phoneUtils";
 import { buildMessage, type FormatRule } from "@/lib/buildMessage";
 import { applyFilters, type FilterRule } from "@/lib/applyFilters";
-import { type VariableMapping } from "@/lib/whatsapp";
+import { type VariableMapping, validateHeaderMedia } from "@/lib/whatsapp";
 import { requireUserId } from "@/lib/auth";
 import { handleApiError } from "@/lib/apiResponse";
 import { hasFeature } from "@/lib/plans";
@@ -44,6 +44,11 @@ interface CreateCampaignBody {
   // "phoneNumber" in that path — audiences resolve to SavedContact
   // rows, which always carry that field.
   audienceId?: string | null;
+  // Optional media header for templates that declare one (image,
+  // video, or document). One static media per campaign — every
+  // recipient receives the same header. Validated at the server
+  // boundary via validateHeaderMedia.
+  headerMedia?: unknown;
 }
 
 function badRequest(message: string) {
@@ -262,6 +267,15 @@ export async function POST(req: NextRequest) {
     clientId = client.id;
   }
 
+  // Header media validation — accepts null/undefined for text-only
+  // templates. Rejects with a clear 400 if the client sent a malformed
+  // shape (wrong type, non-https URL, filename too long, etc.) so the
+  // user sees the error at build time instead of as a Meta rejection
+  // at send time.
+  const hmCheck = validateHeaderMedia(body.headerMedia);
+  if (!hmCheck.ok) return badRequest(hmCheck.error);
+  const headerMediaJson = hmCheck.value ? JSON.stringify(hmCheck.value) : null;
+
   try {
     const campaign = await prisma.campaign.create({
       data: {
@@ -273,6 +287,7 @@ export async function POST(req: NextRequest) {
         staticVars: JSON.stringify(staticVars),
         variableMap: JSON.stringify(body.variableMap ?? []),
         formatRules: JSON.stringify(formatRules),
+        headerMedia: headerMediaJson,
         phoneColumn,
         delayMs,
         status: "draft",

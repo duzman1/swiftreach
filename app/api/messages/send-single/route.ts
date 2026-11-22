@@ -16,6 +16,7 @@ import { handleApiError } from "@/lib/apiResponse";
 import { prisma } from "@/lib/prisma";
 import { checkSuppression } from "@/lib/checkSuppression";
 import { recordOutboundMessage } from "@/lib/outboundMessage";
+import { validateHeaderMedia } from "@/lib/whatsapp";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,10 @@ interface SendSingleBody {
   rowData?: Record<string, string>;
   staticVars?: Record<string, string>;
   formatRules?: Record<string, FormatRule>;
+  // Media header for templates that declare one. Ignored for freeform
+  // mode (freeform sends don't have a Meta template component to
+  // attach a header to).
+  headerMedia?: unknown;
 }
 
 function badRequest(message: string) {
@@ -160,10 +165,13 @@ export async function POST(req: NextRequest) {
     if (!body.templateName || !body.templateLanguage) {
       return badRequest("Missing 'templateName' or 'templateLanguage' for template mode");
     }
+    const hmCheck = validateHeaderMedia(body.headerMedia);
+    if (!hmCheck.ok) return badRequest(hmCheck.error);
     const components = buildTemplateComponents(
       body.variableMap ?? [],
       body.rowData ?? {},
-      body.staticVars ?? {}
+      body.staticVars ?? {},
+      hmCheck.value
     );
     const result = await sendWithRetry(() =>
       sendTemplateMessage(

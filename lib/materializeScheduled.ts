@@ -37,6 +37,10 @@ interface ScheduledLike {
   // A schedule created against an audience id has this set; a legacy
   // CSV-snapshot schedule has null.
   audienceId?: string | null;
+  // Template media header JSON (stringified HeaderMedia). Mirrored
+  // onto the fired Campaign so the send loop reads it via its own
+  // headerMedia column.
+  headerMedia?: string | null;
 }
 
 /** Thrown when a scheduled run cannot proceed — the caller should
@@ -178,6 +182,9 @@ export async function materializeScheduledCampaign(
       staticVars: scheduled.staticVars,
       variableMap: scheduled.variableMap,
       formatRules: scheduled.formatRules,
+      // Carry the header-media config from the schedule to the fired
+      // Campaign — the send loop reads it via Campaign.headerMedia.
+      headerMedia: scheduled.headerMedia ?? null,
       phoneColumn,
       delayMs: scheduled.delayMs,
       status: "draft",

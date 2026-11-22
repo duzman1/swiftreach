@@ -115,6 +115,18 @@ export async function GET(
   const campaignMode = campaign.mode;
   const campaignTemplateName = campaign.templateName ?? "";
   const campaignContacts = campaign.contacts;
+  // Parse headerMedia once per campaign; same media is sent to every
+  // contact. Malformed JSON → null (same effect as no header). We
+  // don't reject the whole send for a bad header blob at this stage —
+  // validation already ran at POST /api/campaigns.
+  let campaignHeaderMedia: import("@/lib/whatsapp").HeaderMedia | null = null;
+  if (campaign.headerMedia) {
+    try {
+      campaignHeaderMedia = JSON.parse(campaign.headerMedia);
+    } catch {
+      campaignHeaderMedia = null;
+    }
+  }
   const creds = userCreds;
   const userIdLocal = userId;
 
@@ -269,7 +281,8 @@ export async function GET(
               const components = buildTemplateComponents(
                 variableMap,
                 rowData,
-                staticVars
+                staticVars,
+                campaignHeaderMedia
               );
               // DEBUG: surface exactly what we're about to send for this
               // contact, including the resolved components. The matching

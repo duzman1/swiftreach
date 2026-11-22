@@ -32,7 +32,7 @@ import {
 import { applyFilters, type FilterRule } from "@/lib/applyFilters";
 import { isValidPhone, normalizePhone } from "@/lib/phoneUtils";
 import type { ParsedFile } from "@/lib/parseFile";
-import type { VariableMapping } from "@/lib/whatsapp";
+import type { HeaderMedia, VariableMapping } from "@/lib/whatsapp";
 import { toast } from "sonner";
 
 type CreatedCampaign = {
@@ -57,6 +57,10 @@ export function WizardSend() {
   const [templateName, setTemplateName] = React.useState("");
   const [templateLanguage, setTemplateLanguage] = React.useState("en_US");
   const [variableMap, setVariableMap] = React.useState<VariableMapping[]>([]);
+  // Media header for templates that declare one. null = text-only
+  // (no header, or header is text — text headers map through the
+  // normal variable list like any body position).
+  const [headerMedia, setHeaderMedia] = React.useState<HeaderMedia | null>(null);
 
   // Step 4
   const [campaignName, setCampaignName] = React.useState("");
@@ -290,6 +294,7 @@ export function WizardSend() {
     setFormatRules({});
     setTemplateName("");
     setVariableMap([]);
+    setHeaderMedia(null);
     setCampaignName("");
     setFilters([]);
     setSkippedIndices([]);
@@ -417,6 +422,7 @@ export function WizardSend() {
               variableMap,
               rowData: firstRow,
               staticVars: staticVarsObj,
+              headerMedia,
             };
       const res = await fetch("/api/messages/send-single", {
         method: "POST",
@@ -529,6 +535,7 @@ export function WizardSend() {
           templateName: mode === "template" ? templateName : undefined,
           templateLanguage: mode === "template" ? templateLanguage : undefined,
           variableMap: mode === "template" ? variableMap : undefined,
+          headerMedia: mode === "template" ? headerMedia : undefined,
           staticVars: staticVarsObj,
           formatRules,
           delayMs,
@@ -594,6 +601,7 @@ export function WizardSend() {
         templateName: mode === "template" ? templateName : undefined,
         templateLanguage: mode === "template" ? templateLanguage : undefined,
         variableMap: mode === "template" ? variableMap : undefined,
+        headerMedia: mode === "template" ? headerMedia : undefined,
         staticVars: staticVarsObj,
         formatRules,
         defaultCountryCode,
@@ -802,6 +810,8 @@ export function WizardSend() {
                   onTemplateLanguage={setTemplateLanguage}
                   variableMap={variableMap}
                   onVariableMap={setVariableMap}
+                  headerMedia={headerMedia}
+                  onHeaderMedia={setHeaderMedia}
                   onTestSend={runTestSend}
                   testSending={testSending}
                 />
