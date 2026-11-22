@@ -134,6 +134,7 @@ export default function DevelopersPage() {
               ["variables", "object", "optional", "Key-value pairs for placeholders."],
               ["language", "string", "optional", "Template language code. Defaults to en_US."],
               ["api_key", "string", "optional", "Alternative to Authorization header."],
+              ["external_id", "string", "optional", "Your own id for this message (max 128 chars). Stored on the message and echoed back in every delivery/read/failed webhook event for easy correlation."],
             ]}
           />
 
@@ -182,6 +183,24 @@ export default function DevelopersPage() {
       "3": "150"
     }
   }'`}</CodeBlock>
+
+          <p className="text-sm text-zinc-700 mt-6 mb-2">
+            With <code className="bg-zinc-100 px-1 rounded">external_id</code> for correlation:
+          </p>
+          <CodeBlock label="cURL">{`curl -X POST https://www.swiftreach.app/api/webhooks/trigger \\
+  -H "Authorization: Bearer sr_live_abc123..." \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "phone": "+13103459139",
+    "message": "Your order is ready for pickup.",
+    "external_id": "order_7f3b2c1a"
+  }'`}</CodeBlock>
+          <p className="text-xs text-muted-foreground mt-2">
+            Pass your own id and SwiftReach echoes it in every delivery /
+            read / failed webhook tied to this message. Lets your
+            integration match outbound events to your own records without
+            tracking WhatsApp wamids.
+          </p>
         </Section>
 
         {/* ERROR REFERENCE */}
