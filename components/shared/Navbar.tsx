@@ -23,6 +23,7 @@ import {
   Menu,
   X,
   ShieldCheck,
+  Webhook,
 } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,10 @@ const SECTIONS: { items: NavItem[] }[] = [
       { href: "/support", label: "Support", icon: LifeBuoy },
       { href: "/billing", label: "Billing", icon: CreditCard },
       { href: "/settings/api-keys", label: "API Keys", icon: Code2, paidOnly: true, requiresPlan: "Starter" },
+      // Outbound-webhooks dev feature. Same gating as API Keys —
+      // they travel together (webhooks are the inverse direction of
+      // the API-key'd /api/webhooks/trigger endpoint).
+      { href: "/settings/webhooks", label: "Webhooks", icon: Webhook, paidOnly: true, requiresPlan: "Starter" },
       // Compliance dashboard — every plan (including Free) because
       // consent enforcement is protection, never an upsell.
       { href: "/settings/compliance", label: "Compliance", icon: ShieldCheck },
