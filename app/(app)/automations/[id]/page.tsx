@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/auth";
 import { formatMonthDay } from "@/lib/dateUtils";
 import { AutomationRowActions } from "@/components/automations/AutomationRowActions";
+import { LocalTime } from "@/components/shared/LocalTime";
 
 export const dynamic = "force-dynamic";
 
@@ -191,7 +192,7 @@ export default async function AutomationDetailPage({
                 {automation.runs.map((r) => (
                   <tr key={r.id}>
                     <td className="px-3 py-2 text-xs text-zinc-700 whitespace-nowrap">
-                      {new Date(r.runDate).toLocaleString()}
+                      <LocalTime value={r.runDate} />
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {r.contactsFound}
@@ -254,9 +255,7 @@ export default async function AutomationDetailPage({
                   </td>
                   <td className="px-3 py-2">{formatMonthDay(c.month, c.day)}</td>
                   <td className="px-3 py-2 text-xs text-zinc-500">
-                    {c.lastSentAt
-                      ? new Date(c.lastSentAt).toLocaleDateString()
-                      : "—"}
+                    <LocalTime value={c.lastSentAt} mode="date" />
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {c.totalSent}

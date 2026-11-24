@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StatsBar } from "@/components/shared/StatsBar";
+import { LocalTime } from "@/components/shared/LocalTime";
 import { CampaignActions } from "@/components/campaigns/CampaignActions";
 import { CampaignClientSelector } from "@/components/campaigns/CampaignClientSelector";
 import { DownloadReportButton } from "@/components/reports/DownloadReportButton";
@@ -32,11 +33,6 @@ async function loadCampaign(id: string, userId: string) {
   } catch {
     return null;
   }
-}
-
-function formatDate(d: Date | null): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleString();
 }
 
 export default async function CampaignDetailPage({
@@ -90,11 +86,11 @@ export default async function CampaignDetailPage({
                 Mode: <strong>{campaign.mode === "freeform" ? "Free-form" : "Template"}</strong>
               </span>
               <span>·</span>
-              <span>Created {formatDate(campaign.createdAt)}</span>
+              <span>Created <LocalTime value={campaign.createdAt} /></span>
               {campaign.completedAt && (
                 <>
                   <span>·</span>
-                  <span>Completed {formatDate(campaign.completedAt)}</span>
+                  <span>Completed <LocalTime value={campaign.completedAt} /></span>
                 </>
               )}
               {canUseClients && (
@@ -156,7 +152,7 @@ export default async function CampaignDetailPage({
           {campaign.autoRetryRanAt ? (
             <p className="text-sm text-sky-800">
               <span className="font-medium">↻ Auto-retry ran</span> at{" "}
-              {new Date(campaign.autoRetryRanAt).toLocaleString()} —{" "}
+              <LocalTime value={campaign.autoRetryRanAt} /> —{" "}
               <strong>{campaign.retryDelivered}</strong> of{" "}
               <strong>{campaign.retriedContactCount}</strong> delivered on retry.
               {campaign.failedCount > 0 && (
@@ -310,13 +306,13 @@ export default async function CampaignDetailPage({
                           </div>
                         </td>
                         <td className="p-2 text-xs text-muted-foreground">
-                          {c.sentAt ? new Date(c.sentAt).toLocaleTimeString() : "—"}
+                          <LocalTime value={c.sentAt} mode="time" />
                         </td>
                         <td className="p-2 text-xs text-muted-foreground">
-                          {c.deliveredAt ? new Date(c.deliveredAt).toLocaleTimeString() : "—"}
+                          <LocalTime value={c.deliveredAt} mode="time" />
                         </td>
                         <td className="p-2 text-xs text-muted-foreground">
-                          {c.readAt ? new Date(c.readAt).toLocaleTimeString() : "—"}
+                          <LocalTime value={c.readAt} mode="time" />
                         </td>
                         <td
                           className="p-2 text-xs text-red-700 max-w-[280px] truncate"
