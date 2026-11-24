@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { StatsBar } from "@/components/shared/StatsBar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConnectionBanner } from "@/components/shared/ConnectionBanner";
+import { LocalTime } from "@/components/shared/LocalTime";
 import { SetupWizardBanner } from "@/components/shared/SetupWizardBanner";
 import { UnreadAlertsBanner } from "@/components/shared/UnreadAlertsBanner";
 import { Send, FileText, Settings, MessageCircle, MessageSquare } from "lucide-react";
@@ -210,7 +211,7 @@ async function renderDashboard() {
                       <div className="min-w-0">
                         <div className="font-medium truncate">{c.name}</div>
                         <div className="text-xs text-muted-foreground">
-                          {new Date(c.createdAt).toLocaleString()} ·{" "}
+                          <LocalTime value={c.createdAt} /> ·{" "}
                           {formatNumber(c.sentCount)}/{formatNumber(c.totalCount)} sent
                         </div>
                       </div>

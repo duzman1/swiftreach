@@ -11,6 +11,7 @@ import { requireUser } from "@/lib/auth";
 import { getAutomationCapacity } from "@/lib/automationLimits";
 import { formatMonthDay } from "@/lib/dateUtils";
 import { AutomationRowActions } from "@/components/automations/AutomationRowActions";
+import { LocalTime } from "@/components/shared/LocalTime";
 import { Button } from "@/components/ui/button";
 import {
   classifyAutomationsForPlan,
@@ -169,7 +170,7 @@ export default async function AutomationsPage() {
                         {a.lastRunAt ? (
                           <>
                             Last run:{" "}
-                            {new Date(a.lastRunAt).toLocaleDateString()} ·{" "}
+                            <LocalTime value={a.lastRunAt} mode="date" /> ·{" "}
                             {a.totalSent} message
                             {a.totalSent === 1 ? "" : "s"} sent all-time
                           </>

@@ -16,6 +16,7 @@ import {
 import { ensureUsagePeriodCurrent } from "@/lib/usageCheck";
 import { PlanComparison } from "@/components/billing/PlanComparison";
 import { PortalButton } from "@/components/billing/PortalButton";
+import { LocalTime } from "@/components/shared/LocalTime";
 
 export const dynamic = "force-dynamic";
 
@@ -28,14 +29,11 @@ const FEATURE_MESSAGES: Record<string, string> = {
     "Upgrade to import contacts directly from Google Drive.",
 };
 
-function fmtDate(d: Date | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
+const LONG_DATE_OPTS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+};
 
 /**
  * Badge next to the plan name.
@@ -73,7 +71,7 @@ function pickStatusBadge({
   if (cancelAtPeriodEnd) {
     return (
       <Badge variant="warning">
-        Cancels {periodEnd ? fmtDate(periodEnd) : ""}
+        Cancels {periodEnd ? <LocalTime value={periodEnd} mode="date" options={LONG_DATE_OPTS} fallback="" /> : ""}
       </Badge>
     );
   }
@@ -136,7 +134,7 @@ function SubscriptionStatusLine({
   if (cancelAtPeriodEnd && currentPeriodEnd) {
     return (
       <p className="text-sm font-medium text-amber-700 mt-1">
-        Access until {fmtDate(currentPeriodEnd)} · Cancelled
+        Access until <LocalTime value={currentPeriodEnd} mode="date" options={LONG_DATE_OPTS} /> · Cancelled
       </p>
     );
   }
@@ -148,7 +146,7 @@ function SubscriptionStatusLine({
   ) {
     return (
       <p className="text-sm text-muted-foreground mt-1">
-        Renews {fmtDate(currentPeriodEnd)}
+        Renews <LocalTime value={currentPeriodEnd} mode="date" options={LONG_DATE_OPTS} />
       </p>
     );
   }
