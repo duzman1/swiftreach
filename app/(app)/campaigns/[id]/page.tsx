@@ -14,6 +14,10 @@ import { hasFeature } from "@/lib/plans";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { pickContactName } from "@/lib/contactName";
 import { translateError } from "@/lib/translateError";
+import {
+  analyzeCampaignPerformance,
+  type CampaignStats,
+} from "@/lib/campaignAnalysis";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +39,52 @@ async function loadCampaign(id: string, userId: string) {
   }
 }
 
+// Count opt-outs from OptOutLog for this campaign (same source the
+// persisted alerts use in lib/campaignAlerts.ts — includes both
+// send-time skips and post-send STOP replies).
+async function loadOptOutCount(
+  userId: string,
+  createdAt: Date,
+  contacts: Array<{ phoneNumber: string }>
+): Promise<number> {
+  const phones = Array.from(new Set(contacts.map((c) => c.phoneNumber)));
+  if (phones.length === 0) return 0;
+  try {
+    return await prisma.optOutLog.count({
+      where: {
+        userId,
+        phoneNumber: { in: phones },
+        createdAt: { gte: createdAt },
+      },
+    });
+  } catch {
+    return 0;
+  }
+}
+
+// Compute campaign stats from the CURRENT Contact rows. Matches the
+// persistence path in lib/campaignAlerts.ts so UI + email + admin
+// dashboard all speak the same vocabulary — the only difference is
+// that this runs at page-render time instead of send-completion
+// time, so it picks up delivery/read events that arrived AFTER the
+// campaign finished.
+function buildLiveStats(
+  contacts: Array<{ status: string; deliveredAt: Date | null; readAt: Date | null }>,
+  optOutCount: number
+): CampaignStats {
+  const attempted = new Set(["sent", "delivered", "read", "failed"]);
+  const skipped = new Set(["skipped", "invalid", "cancelled"]);
+  return {
+    totalCount: contacts.length,
+    sentCount: contacts.filter((c) => attempted.has(c.status)).length,
+    deliveredCount: contacts.filter((c) => c.deliveredAt !== null).length,
+    readCount: contacts.filter((c) => c.readAt !== null).length,
+    failedCount: contacts.filter((c) => c.status === "failed").length,
+    skippedCount: contacts.filter((c) => skipped.has(c.status)).length,
+    optOutCount,
+  };
+}
+
 export default async function CampaignDetailPage({
   params,
 }: {
@@ -44,6 +94,14 @@ export default async function CampaignDetailPage({
   const user = await requireUser();
   const campaign = await loadCampaign(params.id, userId);
   if (!campaign) notFound();
+
+  const liveOptOutCount = await loadOptOutCount(
+    userId,
+    campaign.createdAt,
+    campaign.contacts
+  );
+  const liveStats = buildLiveStats(campaign.contacts, liveOptOutCount);
+  const liveAlerts = analyzeCampaignPerformance(liveStats);
 
   // White-label reports are Pro-only. Below-Pro users don't see the
   // download button at all; the /billing page carries the upgrade CTA.
@@ -182,12 +240,12 @@ export default async function CampaignDetailPage({
         </div>
       )}
 
-      {campaign.alerts && campaign.alerts.length > 0 && (
+      {liveAlerts.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-zinc-700 uppercase tracking-wide">
             Performance Insights
           </h3>
-          {campaign.alerts.map((alert) => {
+          {liveAlerts.map((alert, idx) => {
             const border =
               alert.type === "success"
                 ? "border-emerald-500 bg-emerald-50"
@@ -198,7 +256,7 @@ export default async function CampaignDetailPage({
                     : "border-sky-500 bg-sky-50";
             return (
               <div
-                key={alert.id}
+                key={`${alert.category}-${idx}`}
                 className={`p-4 rounded-lg border-l-4 ${border}`}
               >
                 <div className="flex items-start justify-between gap-3">
